@@ -3,11 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const Stripe = require("stripe");
 const bodyParser = require("body-parser");
-const cron = require("node-cron");
-const twilio = require("twilio");
 const { createClient } = require("@supabase/supabase-js");
-
-const { runGoogleLeadEngine } = require("./googleLeads");
 
 // =========================
 // INIT
@@ -20,14 +16,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const client = twilio(
-  process.env.TWILIO_SID,
-  process.env.TWILIO_AUTH
-);
-
 // =========================
 // MIDDLEWARE
 // =========================
+// IMPORTANT: Stripe webhook must use raw body BEFORE JSON middleware
+app.post(
+  "/api/stripe-webhook",
+  bodyParser.raw({ type: "application/json" })
+);
+
+// JSON middleware for everything else
 app.use(express.json());
 
 // =========================
@@ -44,6 +42,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
   try {
     const { email } = req.body;
 
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
@@ -55,7 +57,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
               name: "RoofFlow AI - Roofing Lead System",
             },
             unit_amount: 49700,
-            recurring: { interval: "month" },
+            recurring: {
+              interval: "month",
+            },
           },
           quantity: 1,
         },
@@ -68,47 +72,60 @@ app.post("/api/create-checkout-session", async (req, res) => {
     res.json({ id: session.id });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Checkout error:", err);
+    res.status(500).json({ error: "Failed to create checkout session" });
   }
 });
 
 // =========================
 // STRIPE WEBHOOK
 // =========================
-app.post(
-  "/api/stripe-webhook",
-  bodyParser.raw({ type: "application/json" }),
-  async (req, res) => {
-    const sig = req.headers["stripe-signature"];
+app.post("/api/stripe-webhook", async (req, res) => {
+  const sig = req.headers["stripe-signature"];
 
-    let event;
+  let event;
 
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      return res.status(400).send(err.message);
-    }
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    console.error("Webhook signature error:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
 
+  try {
+    // =========================
+    // HANDLE SUCCESSFUL PAYMENT
+    // =========================
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
       const email = session.metadata?.email;
 
-      if (!email) return res.json({ received: true });
+      if (!email) {
+        return res.json({ received: true, warning: "No email in metadata" });
+      }
 
-      const { data: existing } = await supabase
+      // Check tenant
+      const { data: existing, error: fetchError } = await supabase
         .from("tenants")
-        .select("*")
+        .select("id")
         .eq("email", email)
-        .single();
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error("Supabase fetch error:", fetchError);
+      }
 
       if (existing) {
         await supabase
           .from("tenants")
-          .update({ status: "active" })
+          .update({
+            status: "active",
+            stripe_customer_id: session.customer,
+          })
           .eq("email", email);
       } else {
         await supabase.from("tenants").insert([
@@ -123,8 +140,12 @@ app.post(
     }
 
     res.json({ received: true });
+
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+    res.status(500).json({ error: "Webhook handler failed" });
   }
-);
+});
 
 // =========================
 // START SERVER
