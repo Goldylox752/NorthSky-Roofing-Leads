@@ -37,13 +37,12 @@ app.get("/", (req, res) => {
   res.send("RoofFlow AI SaaS Engine Running 🚀");
 });
 
-
-// ======================================================
-// STRIPE CHECKOUT (TENANT CREATION FLOW)
-// ======================================================
+// =========================
+// STRIPE CHECKOUT SESSION
+// =========================
 app.post("/api/create-checkout-session", async (req, res) => {
   try {
-    const email = req.body.email;
+    const { email } = req.body;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -61,24 +60,21 @@ app.post("/api/create-checkout-session", async (req, res) => {
           quantity: 1,
         },
       ],
-      metadata: {
-        email,
-      },
+      metadata: { email },
       success_url: "https://yourdomain.com/success",
       cancel_url: "https://yourdomain.com/cancel",
     });
 
     res.json({ id: session.id });
+
   } catch (err) {
-    console.error("Stripe error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-
-// ======================================================
-// STRIPE WEBHOOK → CREATE TENANT
-// ======================================================
+// =========================
+// STRIPE WEBHOOK
+// =========================
 app.post(
   "/api/stripe-webhook",
   bodyParser.raw({ type: "application/json" }),
@@ -94,7 +90,6 @@ app.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
-      console.error("Webhook error:", err.message);
       return res.status(400).send(err.message);
     }
 
@@ -102,11 +97,8 @@ app.post(
       const session = event.data.object;
       const email = session.metadata?.email;
 
-      console.log("💰 Payment success:", email);
-
       if (!email) return res.json({ received: true });
 
-      // Check existing tenant
       const { data: existing } = await supabase
         .from("tenants")
         .select("*")
@@ -116,10 +108,7 @@ app.post(
       if (existing) {
         await supabase
           .from("tenants")
-          .update({
-            status: "active",
-            updated_at: new Date().toISOString(),
-          })
+          .update({ status: "active" })
           .eq("email", email);
       } else {
         await supabase.from("tenants").insert([
@@ -128,7 +117,6 @@ app.post(
             stripe_customer_id: session.customer,
             plan: "growth",
             status: "active",
-            created_at: new Date().toISOString(),
           },
         ]);
       }
@@ -138,132 +126,9 @@ app.post(
   }
 );
 
-
-// ======================================================
-// SMS SYSTEM
-// ======================================================
-async function sendLeadSMS(tenant, lead) {
-  try {
-    await client.messages.create({
-      body: `🔥 New Lead\n${lead.name}\n${lead.phone}\n${lead.address}`,
-      from: process.env.TWILIO_NUMBER,
-      to: process.env.RECEIVER_NUMBER,
-    });
-
-    console.log(`📲 SMS sent to ${tenant.email}`);
-  } catch (err) {
-    console.error("SMS error:", err.message);
-  }
-}
-
-
-// ======================================================
-// HOT LEAD LOGGER
-// ======================================================
-function logHotLead(lead) {
-  console.log(`🔥 HOT LEAD | ${lead.name} | SCORE: ${lead.score}`);
-}
-
-
-// ======================================================
-// SAVE LEAD (TENANT-AWARE)
-// ======================================================
-async function saveLead(tenantId, lead) {
-  const { data: settings } = await supabase
-    .from("tenant_settings")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .single();
-
-  const minScore = settings?.max_lead_score || 60;
-
-  if (lead.score < minScore) return;
-
-  const { data: existing } = await supabase
-    .from("leads")
-    .select("id")
-    .eq("phone", lead.phone)
-    .eq("tenant_id", tenantId)
-    .single();
-
-  if (existing) return;
-
-  await supabase.from("leads").insert([
-    {
-      tenant_id: tenantId,
-      ...lead,
-    },
-  ]);
-
-  logHotLead(lead);
-
-  if (lead.score >= 80) {
-    const { data: tenant } = await supabase
-      .from("tenants")
-      .select("*")
-      .eq("id", tenantId)
-      .single();
-
-    await sendLeadSMS(tenant, lead);
-  }
-}
-
-
-// ======================================================
-// RUN ENGINE FOR ONE TENANT
-// ======================================================
-async function runEngineForTenant(tenant) {
-  const settings = await supabase
-    .from("tenant_settings")
-    .select("*")
-    .eq("tenant_id", tenant.id)
-    .single();
-
-  if (!settings.data) return;
-
-  for (const city of settings.data.cities || []) {
-    for (const type of settings.data.job_types || []) {
-      const leads = await runGoogleLeadEngine(`${type} in ${city}`);
-
-      for (const lead of leads) {
-        const score =
-          (lead.rating || 0) * 20 +
-          (lead.reviews_count || 0) * 0.1;
-
-        await saveLead(tenant.id, {
-          name: lead.name,
-          phone: lead.phone,
-          address: lead.address,
-          category: type,
-          source: "google_maps",
-          score: Math.min(Math.floor(score), 100),
-        });
-      }
-    }
-  }
-}
-
-
-// ======================================================
-// CRON (MULTI-TENANT ENGINE)
-// ======================================================
-cron.schedule("0 */6 * * *", async () => {
-  console.log("🧠 Running Multi-Tenant Lead Engine...");
-
-  const { data: tenants } = await supabase
-    .from("tenants")
-    .select("*")
-    .eq("status", "active");
-
-  for (const tenant of tenants || []) {
-    await runEngineForTenant(tenant);
-  }
-});
-
-
-// ======================================================
+// =========================
 // START SERVER
-// ======================================================
+// =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
