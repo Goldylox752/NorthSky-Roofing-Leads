@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NorthSky Roofing Leads | Activate Your Territory</title>
+
+<style>
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+  font-family:Arial;
+}
+
+body{
+  background:#0b1220;
+  color:#fff;
+}
+
+.container{
+  max-width:900px;
+  margin:auto;
+  padding:20px;
+}
+
+.hero{
+  text-align:center;
+  padding:90px 20px;
+}
+
+.hero h1{
+  font-size:48px;
+  margin-bottom:15px;
+}
+
+.hero p{
+  color:#b8c2e0;
+  font-size:16px;
+  margin-bottom:20px;
+  line-height:1.5;
+}
+
+.badge{
+  display:inline-block;
+  background:#1f2937;
+  color:#22c55e;
+  padding:8px 12px;
+  border-radius:20px;
+  font-size:12px;
+  margin-bottom:15px;
+}
+
+.btn{
+  display:inline-block;
+  background:#22c55e;
+  padding:14px 24px;
+  border-radius:8px;
+  font-weight:bold;
+  text-decoration:none;
+  color:#000;
+  margin-top:10px;
+}
+
+.section{
+  padding:35px 20px;
+}
+
+.card{
+  background:#162033;
+  padding:18px;
+  border-radius:10px;
+  margin-bottom:10px;
+  border:1px solid #26324a;
+}
+
+h2{
+  margin-bottom:15px;
+}
+
+.highlight{
+  color:#22c55e;
+  font-weight:bold;
+}
+
+.cta-box{
+  background:#162033;
+  padding:25px;
+  border-radius:10px;
+  border:1px solid #26324a;
+  text-align:center;
+}
+
+input{
+  width:100%;
+  padding:12px;
+  margin:8px 0;
+  border:none;
+  border-radius:6px;
+}
+
+button{
+  width:100%;
+  padding:14px;
+  background:#22c55e;
+  border:none;
+  border-radius:6px;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.small{
+  font-size:12px;
+  color:#94a3b8;
+  margin-top:10px;
+}
+
+.footer{
+  text-align:center;
+  padding:20px;
+  color:#6b7280;
+  font-size:13px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<!-- HERO -->
+<div class="hero">
+
+<div class="badge">⚡ Limited Contractor Slots Per City</div>
+
+<h1>Exclusive Roofing Leads in Your Area</h1>
+
+<p>
+Join <span class="highlight">NorthSky Lead Network</span> and receive verified homeowner roofing requests in real time.
+Leads are exclusive, high-intent, and delivered directly to your phone within minutes.
+</p>
+
+<a href="#activate" class="btn">Activate Lead Access</a>
+
+</div>
+
+<!-- VALUE -->
+<div class="section">
+<h2>Why Contractors Join</h2>
+
+<div class="card">✔ Exclusive territory (only 1 contractor per area)</div>
+<div class="card">✔ Verified homeowner roofing requests (no spam)</div>
+<div class="card">✔ Emergency + high-intent repair jobs</div>
+<div class="card">✔ Instant SMS + email delivery</div>
+</div>
+
+<!-- HOW IT WORKS -->
+<div class="section">
+<h2>How It Works</h2>
+
+<div class="card">1. Secure your lead credit deposit</div>
+<div class="card">2. We activate your exclusive territory</div>
+<div class="card">3. Leads are delivered instantly when available</div>
+<div class="card">4. Credits are deducted automatically per lead</div>
+</div>
+
+<!-- DEPOSITS -->
+<div class="section">
+<h2>Start With Lead Credits</h2>
+
+<div class="card"><b>$250</b> → Starter Access (3–4 leads)</div>
+<div class="card"><b>$500</b> → Standard Access (7–10 leads) ⭐ Recommended</div>
+<div class="card"><b>$1000</b> → Priority Access (15+ premium leads)</div>
+</div>
+
+<!-- TRUST -->
+<div class="section">
+<h2>Contractor Results</h2>
+
+<div class="card">“First 2 leads covered my deposit.”</div>
+<div class="card">“Better than Facebook ads — real homeowners only.”</div>
+</div>
+
+<!-- CTA -->
+<div class="section" id="activate">
+<h2>Activate Your Territory</h2>
+
+<div class="cta-box">
+
+<form id="contractorForm">
+
+<input type="text" placeholder="Business Name" required>
+<input type="text" placeholder="Your Name" required>
+<input type="tel" placeholder="Phone Number" required>
+<input type="email" placeholder="Email Address" required>
+
+<button type="submit">Continue to Secure Deposit</button>
+
+</form>
+
+<div class="small">
+Secure Stripe checkout • Instant activation • Limited availability per city
+</div>
+
+</div>
+
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+© 2026 NorthSky Lead Network. All rights reserved.
+</div>
+
+</div>
+
+<script>
+document.getElementById("contractorForm").addEventListener("submit", async function(e){
+  e.preventDefault();
+
+  const inputs = document.querySelectorAll("input");
+
+  const payload = {
+    business: inputs[0].value,
+    name: inputs[1].value,
+    phone: inputs[2].value,
+    email: inputs[3].value,
+    source: "northsky_roofing_v4",
+    funnel: "contractor_activation",
+    status: "NEW_CONTRACTOR",
+    timestamp: new Date().toISOString(),
+    city: window.location.pathname || "unknown"
+  };
+
+  try {
+    await fetch("https://hook.make.com/YOUR_WEBHOOK_URL", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+
+    // Stripe redirect (your $500 main offer)
+    window.location.href = "https://buy.stripe.com/YOUR_500_LINK";
+
+  } catch (err) {
+    alert("Something went wrong. Please try again.");
+  }
+});
+</script>
+
+</body>
+</html>
