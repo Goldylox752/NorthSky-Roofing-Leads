@@ -1,124 +1,74 @@
-const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
+const axios = require("axios");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// -----------------------------
-// SEARCH TERMS (HIGH INTENT)
-// -----------------------------
-const SEARCHES = [
-  "roofing contractor",
-  "roof repair",
-  "emergency roof repair",
-  "storm damage roof repair",
-  "roof replacement"
-];
+const KEYWORDS = ["roofing contractor", "roof repair", "hail damage roof"];
+const LOCATIONS = ["Leduc, Alberta", "Edmonton, Alberta"];
 
-// Example cities (expand later dynamically)
-const CITIES = [
-  "Toronto",
-  "Calgary",
-  "Edmonton",
-  "Vancouver",
-  "Chicago",
-  "Dallas",
-  "New York"
-];
+function scoreLead(lead) {
+  let score = 0;
+  if (lead.user_ratings_total > 20) score += 20;
+  if (lead.rating >= 4.0) score += 25;
+  if (lead.name.toLowerCase().includes("roof")) score += 30;
+  if (lead.user_ratings_total > 100) score += 25;
+  return score;
+}
 
-// -----------------------------
-// FETCH GOOGLE PLACES
-// -----------------------------
-async function fetchPlaces(query) {
-  const url = `https://maps.googleapis.com/maps/api/place/textsearch/json`;
+async function searchGooglePlaces(query, location) {
+  const url = "https://maps.googleapis.com/maps/api/place/textsearch/json";
 
-  const { data } = await axios.get(url, {
+  const res = await axios.get(url, {
     params: {
-      query,
+      query: `${query} in ${location}`,
       key: process.env.GOOGLE_MAPS_API_KEY
     }
   });
 
-  return data.results || [];
+  return res.data.results || [];
 }
 
-// -----------------------------
-// GET DETAILS (phone etc.)
-// -----------------------------
-async function getPlaceDetails(placeId) {
-  const url = `https://maps.googleapis.com/maps/api/place/details/json`;
-
-  const { data } = await axios.get(url, {
-    params: {
-      place_id: placeId,
-      fields: "name,formatted_phone_number,formatted_address,rating,user_ratings_total",
-      key: process.env.GOOGLE_MAPS_API_KEY
-    }
-  });
-
-  return data.result;
-}
-
-// -----------------------------
-// SIMPLE LEAD SCORING
-// -----------------------------
-function scoreLead(place) {
-  let score = 50;
-
-  if (place.rating >= 4.5) score += 20;
-  if (place.user_ratings_total > 50) score += 20;
-  if (place.user_ratings_total > 200) score += 10;
-
-  return Math.min(score, 100);
-}
-
-// -----------------------------
-// MAIN ENGINE
-// -----------------------------
 async function runGoogleLeadEngine() {
-  for (const city of CITIES) {
-    for (const search of SEARCHES) {
-      const query = `${search} in ${city}`;
+  for (const location of LOCATIONS) {
+    for (const keyword of KEYWORDS) {
 
-      console.log("Searching:", query);
+      const results = await searchGooglePlaces(keyword, location);
 
-      const places = await fetchPlaces(query);
-
-      for (const place of places) {
-        const details = await getPlaceDetails(place.place_id);
-
-        if (!details) continue;
-
-        const score = scoreLead(details);
+      for (const place of results) {
 
         const lead = {
-          name: details.name,
-          phone: details.formatted_phone_number || null,
-          address: details.formatted_address,
-          rating: details.rating || null,
-          reviews_count: details.user_ratings_total || 0,
-          category: search,
-          source: "google_maps",
-          score,
-          created_at: new Date().toISOString()
+          name: place.name,
+          address: place.formatted_address,
+          rating: place.rating || 0,
+          user_ratings_total: place.user_ratings_total || 0,
+          place_id: place.place_id,
+          keyword,
+          location,
+          score: 0,
+          created_at: new Date()
         };
 
-        // skip weak leads
-        if (score < 60) continue;
+        lead.score = scoreLead(lead);
 
-        // prevent duplicates
+        // ❌ filter low quality leads
+        if (lead.score < 40) continue;
+
+        // ❌ duplicate check
         const { data: existing } = await supabase
           .from("leads")
           .select("id")
-          .eq("phone", lead.phone)
-          .single();
+          .eq("place_id", lead.place_id)
+          .maybeSingle();
 
-        if (!existing) {
-          await supabase.from("leads").insert([lead]);
-          console.log("Saved lead:", lead.name, lead.score);
-        }
+        if (existing) continue;
+
+        // 💾 save lead
+        await supabase.from("leads").insert([lead]);
+
+        console.log("🔥 New Lead:", lead.name, "Score:", lead.score);
       }
     }
   }
