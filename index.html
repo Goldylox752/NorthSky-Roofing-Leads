@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RoofFlow AI | Automated Roofing Pipeline</title>
+<title>Get Roofing Jobs | Exclusive Leads System</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://js.stripe.com/v3/"></script>
 
 <style>
 body{
@@ -21,8 +22,8 @@ body{
   padding:40px 20px;
 }
 
-h1{font-size:54px;line-height:1.1}
-h2{font-size:32px;margin-bottom:10px}
+h1{font-size:52px;line-height:1.1}
+h2{font-size:30px;margin-bottom:10px}
 p{color:#cbd5f5;line-height:1.5}
 
 .btn{
@@ -33,18 +34,13 @@ p{color:#cbd5f5;line-height:1.5}
   border:none;
   border-radius:10px;
   cursor:pointer;
-  margin-top:15px;
+  margin-top:20px;
 }
 
-.btn:disabled{
-  opacity:0.6;
-  cursor:not-allowed;
-}
-
-.section{margin-top:70px}
+.section{margin-top:80px}
 
 input{
-  padding:12px;
+  padding:14px;
   width:100%;
   margin-top:10px;
   border-radius:8px;
@@ -67,7 +63,7 @@ input{
 .badge{
   background:#22c55e;
   color:#000;
-  padding:5px 10px;
+  padding:6px 12px;
   border-radius:6px;
   font-size:12px;
   font-weight:700;
@@ -86,27 +82,57 @@ input{
 <body>
 <div class="container">
 
+<!-- HERO -->
 <section>
-<span class="badge">AI Roofing Acquisition System</span>
-<h1>Automated Roofing Jobs On Demand</h1>
-<p>We generate, filter, and deliver real roofing leads automatically.</p>
+<span class="badge">LIMITED TERRITORIES AVAILABLE</span>
 
-<button class="btn" onclick="showStep()">Check Availability In Your Area</button>
+<h1>Get 10–20 Roofing Leads In 7 Days<br>Or You Don’t Pay</h1>
+
+<p>
+We deliver exclusive, high-intent homeowners in your area looking for roofing services right now.
+No cold calling. No chasing.
+</p>
+
+<button class="btn" onclick="showStep()">
+Check If Your Area Is Available
+</button>
 </section>
 
-<section class="section" id="stepSection" style="display:none;">
-<h2>Find Leads In Your Area</h2>
+<!-- BENEFITS -->
+<section class="section">
+<div class="grid">
+  <div class="card">
+    <h3>🔥 High Intent Leads</h3>
+    <p>Only homeowners actively searching for roofing help.</p>
+  </div>
 
-<input id="city" placeholder="Enter your city">
-<input id="type" placeholder="Roofing service type (repair, storm, replacement)">
+  <div class="card">
+    <h3>📍 Exclusive Territory</h3>
+    <p>We only work with 1–2 contractors per city.</p>
+  </div>
+
+  <div class="card">
+    <h3>⚡ Fast Delivery</h3>
+    <p>Start receiving leads within days.</p>
+  </div>
+</div>
+</section>
+
+<!-- FORM -->
+<section class="section" id="stepSection" style="display:none;">
+<h2>Check Availability</h2>
+
+<input id="city" placeholder="Your city">
+<input id="type" placeholder="Service (repair, storm, replacement)">
 
 <button class="btn" id="activateBtn" onclick="startCheckout()">
-Activate System
+Secure My Territory
 </button>
 
 <p id="status" style="margin-top:10px;color:#cbd5f5;"></p>
 </section>
 
+<!-- LIVE FEED -->
 <section class="section">
 <h2>🔥 Live Lead Activity</h2>
 <div id="feed"></div>
@@ -115,31 +141,20 @@ Activate System
 </div>
 
 <script>
-// =========================
 // CONFIG
-// =========================
-
-// Supabase (PUBLIC anon key ONLY)
 const supabaseUrl = "YOUR_SUPABASE_URL";
 const supabaseKey = "YOUR_SUPABASE_ANON_KEY";
 const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
-// Backend API (Vercel)
-const API_BASE = "";
+let isProcessing = false;
 
-// =========================
 // UI
-// =========================
 function showStep(){
   document.getElementById("stepSection").style.display = "block";
   window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
 }
 
-// =========================
-// MAIN FLOW (FIXED STRIPE FLOW)
-// =========================
-let isProcessing = false;
-
+// CHECKOUT FLOW
 async function startCheckout(){
   if (isProcessing) return;
 
@@ -149,65 +164,46 @@ async function startCheckout(){
   const btn = document.getElementById("activateBtn");
 
   if (!city || !type) {
-    status.innerText = "Please fill in both fields.";
+    status.innerText = "Enter your city and service.";
     return;
   }
 
   isProcessing = true;
-
   btn.innerText = "Processing...";
   btn.disabled = true;
-  status.innerText = "Creating secure checkout session...";
+  status.innerText = "Securing your territory...";
 
   try {
-    // Save locally
     localStorage.setItem("lead_city", city);
     localStorage.setItem("lead_type", type);
 
-    // Save lightweight lead (optional tracking)
     await supabase.from("leads").insert([
-      {
-        city,
-        type,
-        created_at: new Date().toISOString()
-      }
+      { city, type, created_at: new Date().toISOString() }
     ]);
 
-    // CALL YOUR VERCEL STRIPE API
     const res = await fetch("/api/create-checkout-session", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ email: "guest@user.com" })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "client@roofing.com" })
     });
 
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
 
-    if (!res.ok) {
-      throw new Error(data.error || "Checkout failed");
-    }
-
-    status.innerText = "Redirecting to payment...";
-
-    // Redirect to Stripe Checkout
     const stripe = Stripe("YOUR_STRIPE_PUBLISHABLE_KEY");
     await stripe.redirectToCheckout({ sessionId: data.id });
 
   } catch (err) {
-    console.error(err);
     status.innerText = "Error: " + err.message;
-    btn.innerText = "Activate System";
+    btn.innerText = "Secure My Territory";
     btn.disabled = false;
     isProcessing = false;
   }
 }
 
-// =========================
-// LIVE FEED (UNCHANGED BUT CLEANED)
-// =========================
-const cities = ["Dallas", "Houston", "Calgary", "Toronto", "Phoenix"];
-const types = ["Roof Leak", "Storm Damage", "Inspection", "Replacement"];
+// LIVE FEED
+const cities = ["Calgary","Edmonton","Toronto","Dallas","Phoenix"];
+const types = ["Roof Leak","Storm Damage","Inspection","Replacement"];
 
 function addLead(){
   const div = document.createElement("div");
@@ -231,11 +227,8 @@ function addLead(){
 }
 
 for(let i=0;i<4;i++) addLead();
-setInterval(addLead, 3500);
+setInterval(addLead, 3000);
 </script>
-
-<!-- Stripe JS -->
-<script src="https://js.stripe.com/v3/"></script>
 
 </body>
 </html>
