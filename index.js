@@ -1,3 +1,12 @@
+const cron = require("node-cron");
+const { runGoogleLeadEngine } = require("./googleLeads");
+
+// every 6 hours (DON'T spam Google)
+cron.schedule("0 */6 * * *", async () => {
+  console.log("Running Google Maps Lead Engine...");
+  await runGoogleLeadEngine();
+});
+
 await supabase.from("leads").insert([lead]);
 
 // send SMS instantly
