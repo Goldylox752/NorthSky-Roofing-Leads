@@ -1,3 +1,97 @@
+async function dispatchLead(lead) {
+  const { data: contractors } = await supabase
+    .from("contractors")
+    .select("*")
+    .eq("subscription_status", "active");
+
+  if (!contractors?.length) return;
+
+  for (const c of contractors) {
+    console.log("Sending lead to:", c.email);
+
+    // Twilio / email / dashboard push here
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+import Stripe from "stripe";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+
+
+
+app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"];
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // 💳 PAYMENT SUCCESS
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+
+    const customerId = session.customer;
+    const email = session.customer_email;
+
+    // 🔓 ACTIVATE CONTRACTOR
+    await supabase
+      .from("contractors")
+      .update({ subscription_status: "active" })
+      .eq("email", email);
+
+    console.log("🔥 Contractor activated:", email);
+  }
+
+  res.json({ received: true });
+});
+
+
+app.post("/api/create-checkout", async (req, res) => {
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "subscription",
+      line_items: [
+        {
+          price: process.env.STRIPE_PRICE_ID,
+          quantity: 1
+        }
+      ],
+      success_url: "https://your-site.com/success",
+      cancel_url: "https://your-site.com/cancel"
+    });
+
+    res.json({ url: session.url });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+
+
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
