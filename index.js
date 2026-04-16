@@ -1,3 +1,67 @@
+
+
+
+
+
+
+
+
+async function dispatchLead(lead) {
+  const { data: contractors } = await supabase
+    .from("contractors")
+    .select("*")
+    .eq("subscription_status", "active");
+
+  if (!contractors || contractors.length === 0) {
+    console.log("No active contractors");
+    return;
+  }
+
+  for (const c of contractors) {
+    // Safety check
+    if (!c.phone) continue;
+
+    if (lead.score >= 70) {
+      // 🔥 HOT LEAD → SMS instantly
+      await sendSMS(c.phone, lead);
+    }
+
+    else if (lead.score >= 40) {
+      // ⚡ WARM LEAD → optional SMS or email
+      console.log("⚡ Warm lead for:", c.email);
+      await sendSMS(c.phone, lead);
+    }
+
+    else {
+      // 🧊 COLD → ignore dispatch
+      console.log("Cold lead stored only");
+    }
+  }
+}
+
+async function sendSMS(to, lead) {
+  try {
+    await twilioClient.messages.create({
+      body: `🔥 NEW ROOFING LEAD
+
+Name: ${lead.name}
+Phone: ${lead.phone}
+City: ${lead.city}
+Issue: ${lead.issue || "N/A"}
+Score: ${lead.score}`,
+      from: process.env.TWILIO_NUMBER,
+      to
+    });
+
+    console.log("📨 SMS sent to:", to);
+  } catch (err) {
+    console.error("❌ SMS failed:", err.message);
+  }
+}
+
+
+
+
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
