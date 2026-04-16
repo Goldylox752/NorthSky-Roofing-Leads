@@ -15,7 +15,30 @@ async function dispatchLead(lead) {
 
 
 
+function scoreLead({ city, issue, timeline }) {
+  let score = 0;
 
+  // urgency = highest value
+  const urgency = {
+    today: 50,
+    this_week: 30,
+    this_month: 10,
+    researching: 0
+  };
+
+  score += urgency[timeline] || 0;
+
+  // intent strength
+  if (issue?.toLowerCase().includes("leak")) score += 35;
+  if (issue?.toLowerCase().includes("emergency")) score += 40;
+  if (issue?.toLowerCase().includes("replacement")) score += 25;
+
+  // geo value
+  const highValueCities = ["edmonton", "calgary"];
+  if (highValueCities.includes(city.toLowerCase())) score += 20;
+
+  return Math.min(score, 100);
+}
 
 
 
