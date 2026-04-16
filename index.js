@@ -1,3 +1,57 @@
+.eq("city", lead.city)
+
+const existing = await supabase
+  .from("lead_assignments")
+  .select("*")
+  .eq("lead_id", lead.id)
+  .single();
+
+if (existing.data) return;
+
+
+async function routeExclusiveLead(lead) {
+  // 1. Get eligible contractors
+  const { data: contractors } = await supabase
+    .from("contractors")
+    .select("*")
+    .eq("subscription_status", "active")
+    .order("subscription_tier", { ascending: false });
+
+  if (!contractors?.length) return;
+
+  // 2. Tier priority system
+  const tierWeight = {
+    elite: 3,
+    pro: 2,
+    starter: 1
+  };
+
+  // 3. Pick best contractor (highest tier first)
+  const sorted = contractors.sort(
+    (a, b) => (tierWeight[b.subscription_tier] || 0) - (tierWeight[a.subscription_tier] || 0)
+  );
+
+  const selected = sorted[0];
+
+  if (!selected) return;
+
+  // 4. Lock lead (IMPORTANT)
+  await supabase.from("lead_assignments").insert([
+    {
+      lead_id: lead.id,
+      contractor_id: selected.id,
+      status: "assigned"
+    }
+  ]);
+
+  // 5. Send ONLY to selected contractor
+  await sendSMS(selected.phone, lead);
+
+  console.log("🎯 Lead assigned exclusively to:", selected.email);
+}
+
+
+
 if (event.type === "checkout.session.completed") {
   const session = event.data.object;
   const email = session.customer_details?.email;
