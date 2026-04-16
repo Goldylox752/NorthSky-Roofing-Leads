@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NorthSky | Instant Roofing Quote</title>
+
+<style>
+  body {
+    margin: 0;
+    font-family: system-ui, Arial;
+    background: #0b1220;
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+
+  h1 {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+
+  p {
+    font-size: 14px;
+    opacity: 0.7;
+    margin-bottom: 20px;
+  }
+
+  input, textarea {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.2);
+    color: white;
+    outline: none;
+  }
+
+  textarea {
+    resize: none;
+    height: 80px;
+  }
+
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    background: #3b82f6;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  button:hover {
+    background: #2563eb;
+  }
+
+  #leadStatus {
+    margin-top: 12px;
+    font-size: 13px;
+    text-align: center;
+    opacity: 0.85;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h1>Get Your Roofing Quote</h1>
+  <p>Fast response from a local contractor</p>
+
+  <!-- Honeypot (spam trap) -->
+  <input type="text" id="company" style="display:none">
+
+  <input id="h_name" placeholder="Full Name *" />
+  <input id="h_phone" placeholder="Phone Number *" />
+  <input id="h_city" placeholder="City *" />
+  <textarea id="h_issue" placeholder="What do you need help with? (optional)"></textarea>
+
+  <button onclick="submitLead()">Submit Request</button>
+
+  <div id="leadStatus"></div>
+</div>
+
+<script>
+const API_BASE = "https://YOUR-BACKEND.onrender.com";
+const API_KEY = "northsky_public_key";
+
+let isSubmitting = false;
+
+async function submitLead() {
+  if (isSubmitting) return;
+
+  const honeypot = document.getElementById("company")?.value;
+  if (honeypot) return;
+
+  const name = document.getElementById("h_name")?.value.trim();
+  const phone = document.getElementById("h_phone")?.value.trim();
+  const city = document.getElementById("h_city")?.value.trim();
+  const issue = document.getElementById("h_issue")?.value.trim();
+  const status = document.getElementById("leadStatus");
+
+  if (!name || !phone || !city) {
+    status.innerText = "Please fill in required fields.";
+    status.style.color = "orange";
+    return;
+  }
+
+  isSubmitting = true;
+  status.innerText = "Submitting...";
+  status.style.color = "#aaa";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/new-lead`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY
+      },
+      body: JSON.stringify({ name, phone, city, issue })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) throw new Error(data.error || "Failed");
+
+    status.innerText = "✅ Request sent! A contractor will contact you soon.";
+    status.style.color = "lightgreen";
+
+    document.getElementById("h_name").value = "";
+    document.getElementById("h_phone").value = "";
+    document.getElementById("h_city").value = "";
+    document.getElementById("h_issue").value = "";
+
+  } catch (err) {
+    console.error(err);
+    status.innerText = "Error sending request. Try again.";
+    status.style.color = "red";
+  } finally {
+    isSubmitting = false;
+  }
+}
+</script>
+
+</body>
+</html>
