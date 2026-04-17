@@ -1,3 +1,25 @@
+if(event.type === "checkout.session.completed"){
+
+  const session = event.data.object;
+
+  const email = session.customer_details.email;
+  const city = session.metadata.city;
+
+  // 1. Mark paid
+  supabase.from("leads")
+    .update({ status: "paid" })
+    .eq("email", email);
+
+  // 2. Lock territory
+  supabase.from("territories")
+    .update({ locked: true, owner_email: email })
+    .eq("city", city);
+
+  // 3. Trigger onboarding
+  sendWelcomeEmail(email, city);
+}
+
+
 .eq("city", lead.city)
 
 const existing = await supabase
