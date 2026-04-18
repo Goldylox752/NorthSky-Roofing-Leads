@@ -72,16 +72,15 @@ nav{
   border-radius:12px;
   border:1px solid rgba(255,255,255,0.08);
   text-align:left;
-  transition:0.2s;
 }
 
-/* HIGHLIGHT PRO (MOST IMPORTANT FOR SALES) */
+/* PRO HIGHLIGHT */
 .plan.pro{
   border:2px solid #4f46e5;
   transform:scale(1.02);
 }
 
-/* ELITE PREMIUM LOOK */
+/* ELITE HIGHLIGHT */
 .plan.elite{
   border:2px solid #22c55e;
 }
@@ -95,7 +94,6 @@ nav{
   margin-bottom:10px;
 }
 
-/* PRICE */
 .price{
   font-size:18px;
   font-weight:700;
@@ -114,18 +112,16 @@ button{
   cursor:pointer;
 }
 
-/* ELITE BUTTON OVERRIDE */
+/* ELITE BUTTON */
 .plan.elite button{
   background:#22c55e;
 }
 
-/* UNLOCK */
 .unlock{
   margin-top:20px;
   background:#22c55e;
 }
 
-/* FORM */
 .hidden{display:none;}
 
 .form-box{
@@ -164,35 +160,39 @@ input{
 <section id="paywall" class="section paywall">
 
   <h2>Unlock Territory Access</h2>
-  <p>Choose your level of control</p>
+  <p>Choose your plan</p>
 
   <!-- STARTER -->
   <div class="plan">
     <h3>Starter Leads</h3>
     <div class="price">$99</div>
-    <p>Entry access to lead system — basic pipeline access</p>
+    <p>Basic entry access to lead system</p>
     <a href="https://buy.stripe.com/dRmfZae1d2eoeofgLK2ZO0C">
       <button>Buy Starter</button>
     </a>
   </div>
 
-  <!-- PRO (MAIN SELLER) -->
+  <!-- PRO (299 - CORRECT) -->
   <div class="plan pro">
-    <h3>Pro Territory <span style="color:#4f46e5;">(Recommended)</span></h3>
+    <h3>Pro Territory (Recommended)</h3>
     <div class="price">$299</div>
-    <p>Priority AI leads + automated workflow + faster closing system</p>
-    <a href="https://buy.stripe.com/aFaeV6cX97yIfsjcvu2ZO0E">
+    <p>Priority AI leads + automation + faster closing system</p>
+
+    <!-- PRO LINK FIXED -->
+    <a href="https://buy.stripe.com/dRm28k8GTaKU1Btcvu2ZO0D">
       <button>Upgrade to Pro</button>
     </a>
   </div>
 
-  <!-- ELITE (TOP TIER) -->
+  <!-- ELITE (999 - CORRECT) -->
   <div class="plan elite">
     <h3>Elite Exclusive Territory</h3>
     <div class="price">$999</div>
-    <p>Full city exclusivity + premium AI leads + locked territory rights</p>
-    <a href="https://buy.stripe.com/dRm28k8GTaKU1Btcvu2ZO0D">
-      <button>Unlock Elite Territory</button>
+    <p>Full city exclusivity + premium AI leads + territory lock</p>
+
+    <!-- ELITE LINK FIXED -->
+    <a href="https://buy.stripe.com/aFaeV6cX97yIfsjcvu2ZO0E">
+      <button>Unlock Elite</button>
     </a>
   </div>
 
@@ -236,7 +236,6 @@ function getSessionId(){
   }
   return id;
 }
-const SESSION_ID = getSessionId();
 
 /* ================= PAYWALL ================= */
 function unlockAccess(){
@@ -272,7 +271,7 @@ async function submitLead(){
     name,
     email,
     city,
-    session_id: SESSION_ID,
+    session_id: getSessionId(),
     source: "roofflow_paid"
   }]);
 
