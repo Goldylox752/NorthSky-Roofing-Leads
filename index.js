@@ -1,401 +1,158 @@
 <script>
+/* ===============================
+   ROOF FLOW → DRONE BRIDGE CORE
+   =============================== */
 
-// INIT SUPABASE
-const supabase = window.supabase.createClient(
-  "YOUR_SUPABASE_URL",
-  "YOUR_SUPABASE_ANON_KEY"
-);
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY";
 
-// 🔥 STRIPE CHECKOUT LINK
-const STRIPE_LINK = "https://buy.stripe.com/YOUR_LINK";
+let supabase = null;
 
-// SCROLL
-function scrollToForm(){
-  document.getElementById("form").scrollIntoView({ behavior: "smooth" });
-}
-
-// SUBMIT + PAY FLOW
-async function submitLead(){
-
-  const name = document.getElementById("name").value;
-  const email = document.getElementById("email").value;
-  const city = document.getElementById("city").value;
-  const status = document.getElementById("status");
-
-  if(!name || !email || !city){
-    status.innerText = "Please complete all fields.";
-    return;
-  }
-
-  status.innerText = "Checking territory availability...";
-
-  try{
-
-    // Save lead first
-    await supabase
-      .from("leads")
-      .insert([{ name, email, city, status: "pending" }]);
-
-    // Soft close (important for conversion)
-    status.innerText = "Territory available. Locking your city...";
-
-    // Redirect to Stripe checkout
-    setTimeout(() => {
-      window.location.href =
-        STRIPE_LINK +
-        "?prefilled_email=" + encodeURIComponent(email);
-    }, 1200);
-
-  }catch(err){
-    console.error(err);
-    status.innerText = "System error. Please try again.";
-  }
-}
-
-</script>
-
-
-
-if(event.type === "checkout.session.completed"){
-
-  const session = event.data.object;
-
-  const email = session.customer_details.email;
-  const city = session.metadata.city;
-
-  // 1. Mark paid
-  supabase.from("leads")
-    .update({ status: "paid" })
-    .eq("email", email);
-
-  // 2. Lock territory
-  supabase.from("territories")
-    .update({ locked: true, owner_email: email })
-    .eq("city", city);
-
-  // 3. Trigger onboarding
-  sendWelcomeEmail(email, city);
-}
-
-
-.eq("city", lead.city)
-
-const existing = await supabase
-  .from("lead_assignments")
-  .select("*")
-  .eq("lead_id", lead.id)
-  .single();
-
-if (existing.data) return;
-
-
-async function routeExclusiveLead(lead) {
-  // 1. Get eligible contractors
-  const { data: contractors } = await supabase
-    .from("contractors")
-    .select("*")
-    .eq("subscription_status", "active")
-    .order("subscription_tier", { ascending: false });
-
-  if (!contractors?.length) return;
-
-  // 2. Tier priority system
-  const tierWeight = {
-    elite: 3,
-    pro: 2,
-    starter: 1
-  };
-
-  // 3. Pick best contractor (highest tier first)
-  const sorted = contractors.sort(
-    (a, b) => (tierWeight[b.subscription_tier] || 0) - (tierWeight[a.subscription_tier] || 0)
-  );
-
-  const selected = sorted[0];
-
-  if (!selected) return;
-
-  // 4. Lock lead (IMPORTANT)
-  await supabase.from("lead_assignments").insert([
-    {
-      lead_id: lead.id,
-      contractor_id: selected.id,
-      status: "assigned"
+/* INIT SUPABASE */
+function initSupabase(){
+  try {
+    if (window.supabase && SUPABASE_URL && SUPABASE_KEY) {
+      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      console.log("Supabase connected");
     }
-  ]);
+  } catch (e) {
+    console.log("Supabase init failed");
+  }
+}
+initSupabase();
 
-  // 5. Send ONLY to selected contractor
-  await sendSMS(selected.phone, lead);
+/* ===============================
+   SESSION ID (GLOBAL IDENTITY)
+   =============================== */
+function getSessionId(){
+  let id = localStorage.getItem("session_id");
 
-  console.log("🎯 Lead assigned exclusively to:", selected.email);
+  if (!id){
+    id = crypto.randomUUID();
+    localStorage.setItem("session_id", id);
+  }
+
+  return id;
 }
 
+/* ===============================
+   UTM CAPTURE
+   =============================== */
+function getUTMs(){
+  const p = new URLSearchParams(window.location.search);
 
-
-if (event.type === "checkout.session.completed") {
-  const session = event.data.object;
-  const email = session.customer_details?.email;
-
-  const tier =
-    session.amount_total === 9900 ? "starter" :
-    session.amount_total === 29900 ? "pro" :
-    "elite";
-
-  await supabase
-    .from("contractors")
-    .update({
-      subscription_status: "active",
-      subscription_tier: tier
-    })
-    .eq("email", email);
-}
-
-
-
-app.post("/api/create-checkout", async (req, res) => {
-  const { email, tier } = req.body;
-
-  const prices = {
-    starter: "price_xxx1",
-    pro: "price_xxx2",
-    elite: "price_xxx3",
+  return {
+    utm_source: p.get("utm_source") || "roofflow",
+    utm_campaign: p.get("utm_campaign") || "organic",
+    utm_content: p.get("utm_content") || null,
+    cpc: parseFloat(p.get("cpc")) || 0
   };
+}
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    payment_method_types: ["card"],
-    customer_email: email,
-    line_items: [
-      {
-        price: prices[tier],
-        quantity: 1,
-      },
-    ],
-    success_url: "https://your-site.com/dashboard",
-    cancel_url: "https://your-site.com/pricing",
+/* ===============================
+   ROOF FLOW → DRONE HANDOFF
+   =============================== */
+function sendToDrone(){
+
+  const session_id = getSessionId();
+  const utm = getUTMs();
+
+  const droneUrl = new URL("https://northsky-drones.vercel.app");
+
+  // identity pass-through
+  droneUrl.searchParams.set("session_id", session_id);
+
+  // attribution pass-through
+  droneUrl.searchParams.set("utm_source", utm.utm_source);
+  droneUrl.searchParams.set("utm_campaign", utm.utm_campaign);
+  droneUrl.searchParams.set("utm_content", utm.utm_content || "");
+  droneUrl.searchParams.set("cpc", utm.cpc);
+
+  droneUrl.searchParams.set("from", "roofflow");
+
+  // analytics event (RoofFlow side)
+  track("funnel_bridge_click", {
+    session_id,
+    ...utm,
+    destination: "drone_funnel"
   });
 
-  res.json({ url: session.url });
-});
-
-
-
-import express from "express";
-import cors from "cors";
-import rateLimit from "express-rate-limit";
-import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
-import twilio from "twilio";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-// ========================
-// APP + SERVICES
-// ========================
-const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
-
-const twilioClient = twilio(
-  process.env.TWILIO_SID,
-  process.env.TWILIO_AUTH
-);
-
-// ========================
-// MIDDLEWARE
-// ========================
-app.use(cors());
-app.use(express.json());
-
-app.use(
-  "/api/new-lead",
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 5,
-  })
-);
-
-// ========================
-// LEAD SCORING ENGINE
-// ========================
-function scoreLead({ city, issue, timeline }) {
-  let score = 0;
-
-  const urgencyMap = {
-    today: 50,
-    this_week: 30,
-    this_month: 10,
-    researching: 0,
-  };
-
-  score += urgencyMap[timeline] || 0;
-
-  const text = (issue || "").toLowerCase();
-
-  if (text.includes("leak")) score += 35;
-  if (text.includes("emergency")) score += 40;
-  if (text.includes("replacement")) score += 25;
-  if (text.includes("insurance")) score += 20;
-
-  const cityLower = (city || "").toLowerCase();
-  if (cityLower.includes("edmonton")) score += 20;
-  if (cityLower.includes("calgary")) score += 20;
-
-  return Math.min(score, 100);
+  window.location.href = droneUrl.toString();
 }
 
-// ========================
-// SMS FUNCTION
-// ========================
-async function sendSMS(to, lead) {
+/* ===============================
+   EVENT TRACKING (SAFE)
+   =============================== */
+async function track(event, meta = {}){
+
+  if (!supabase) return;
+
   try {
-    await twilioClient.messages.create({
-      body: `🔥 NEW ROOFING LEAD
-
-Name: ${lead.name}
-Phone: ${lead.phone}
-City: ${lead.city}
-Issue: ${lead.issue || "N/A"}
-Timeline: ${lead.timeline || "N/A"}
-Score: ${lead.score}`,
-      from: process.env.TWILIO_NUMBER,
-      to,
-    });
-
-    console.log("📨 SMS sent:", to);
-  } catch (err) {
-    console.error("❌ SMS failed:", err.message);
+    await supabase.from("events").insert([{
+      event,
+      meta: {
+        ...meta,
+        session_id: getSessionId(),
+        url: window.location.href,
+        referrer: document.referrer || "direct"
+      },
+      created_at: new Date().toISOString()
+    }]);
+  } catch (e) {
+    console.log("track error");
   }
 }
 
-// ========================
-// DISPATCH ENGINE
-// ========================
-async function dispatchLead(lead) {
-  const { data: contractors } = await supabase
-    .from("contractors")
-    .select("email, phone")
-    .eq("subscription_status", "active");
+/* ===============================
+   LEAD SUBMISSION (ROOF FLOW)
+   =============================== */
+async function submitLead(){
 
-  if (!contractors?.length) {
-    console.log("No active contractors");
+  const name = document.getElementById("name")?.value;
+  const email = document.getElementById("email")?.value;
+  const city = document.getElementById("city")?.value;
+
+  if (!name || !email || !city){
+    alert("Please complete all fields");
     return;
   }
 
-  for (const c of contractors) {
-    if (!c.phone) continue;
+  const session_id = getSessionId();
+  const utm = getUTMs();
 
-    if (lead.score >= 70) {
-      console.log("🔥 HOT LEAD → SMS:", c.phone);
-      await sendSMS(c.phone, lead);
-    } else if (lead.score >= 40) {
-      console.log("⚡ WARM LEAD → SMS:", c.phone);
-      await sendSMS(c.phone, lead);
-    } else {
-      console.log("🧊 COLD LEAD ignored for dispatch");
-    }
+  await track("lead_capture", {
+    name,
+    email,
+    city,
+    ...utm
+  });
+
+  if (supabase){
+    await supabase.from("leads").insert([{
+      name,
+      email,
+      city,
+      session_id,
+      source: utm.utm_source,
+      campaign: utm.utm_campaign,
+      created_at: new Date().toISOString()
+    }]);
   }
+
+  // redirect into drone funnel (IMPORTANT LINK)
+  setTimeout(() => {
+    sendToDrone();
+  }, 800);
 }
 
-// ========================
-// STRIPE WEBHOOK
-// ========================
-app.post(
-  "/api/stripe-webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    const sig = req.headers["stripe-signature"];
-    let event;
+/* ===============================
+   PAGE INIT
+   =============================== */
+window.addEventListener("load", () => {
 
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+  track("page_view", {
+    source: getUTMs().utm_source
+  });
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const email = session.customer_details?.email;
-
-      if (email) {
-        await supabase
-          .from("contractors")
-          .update({ subscription_status: "active" })
-          .eq("email", email);
-
-        console.log("✅ Contractor activated:", email);
-      }
-    }
-
-    res.json({ received: true });
-  }
-);
-
-// ========================
-// NEW LEAD ENDPOINT
-// ========================
-app.post("/api/new-lead", async (req, res) => {
-  try {
-    const { name, phone, city, issue, timeline } = req.body;
-
-    if (!name || !phone || !city) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const score = scoreLead({ city, issue, timeline });
-
-    const lead = {
-      name,
-      phone,
-      city,
-      issue,
-      timeline,
-      score,
-      created_at: new Date(),
-    };
-
-    const { error } = await supabase.from("leads").insert([lead]);
-
-    if (error) throw error;
-
-    console.log("📥 Lead saved:", score);
-
-    if (score >= 70) {
-      console.log("🔥 HOT LEAD");
-      await dispatchLead(lead);
-    } else if (score >= 40) {
-      console.log("⚡ WARM LEAD");
-      await dispatchLead(lead);
-    } else {
-      console.log("🧊 COLD LEAD STORED ONLY");
-    }
-
-    res.json({ success: true, score });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
 });
-
-// ========================
-// HEALTH CHECK
-// ========================
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-// ========================
-// START SERVER
-// ========================
-app.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 NorthSky backend running");
-});
+</script>
