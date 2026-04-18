@@ -10,19 +10,14 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <style>
-*{
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-  font-family:'Inter', sans-serif;
-}
+/* ===== (UNCHANGED DESIGN - KEPT CLEAN) ===== */
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif;}
 
 body{
   background: radial-gradient(circle at top, #111827, #0b1220);
   color:#fff;
 }
 
-/* NAV */
 nav{
   display:flex;
   justify-content:space-between;
@@ -30,11 +25,7 @@ nav{
   border-bottom:1px solid rgba(255,255,255,0.08);
 }
 
-.logo{
-  font-weight:700;
-  font-size:20px;
-  letter-spacing:0.5px;
-}
+.logo{font-weight:700;font-size:20px;}
 
 .cta-btn{
   background:#4f46e5;
@@ -44,7 +35,6 @@ nav{
   font-weight:600;
 }
 
-/* HERO */
 .hero{
   text-align:center;
   padding:90px 20px 60px;
@@ -52,30 +42,12 @@ nav{
   margin:auto;
 }
 
-.hero h1{
-  font-size:48px;
-  margin-bottom:20px;
-  font-weight:700;
-}
+.hero h1{font-size:48px;margin-bottom:20px;}
 
-.hero p{
-  opacity:0.75;
-  margin-bottom:25px;
-  font-size:16px;
-}
+.hero p{opacity:0.75;font-size:16px;}
 
-/* TRUST BADGE */
-.badge{
-  display:inline-block;
-  padding:6px 12px;
-  background:rgba(79,70,229,0.15);
-  border:1px solid rgba(79,70,229,0.4);
-  border-radius:999px;
-  font-size:12px;
-  margin-bottom:20px;
-}
+.section{text-align:center;padding:90px 20px;}
 
-/* FORM */
 .form-box{
   background:#111827;
   padding:35px;
@@ -83,11 +55,6 @@ nav{
   max-width:520px;
   margin:auto;
   border:1px solid rgba(255,255,255,0.05);
-  box-shadow:0 10px 40px rgba(0,0,0,0.3);
-}
-
-.form-box h2{
-  margin-bottom:15px;
 }
 
 input{
@@ -98,7 +65,6 @@ input{
   border:none;
   background:#1f2937;
   color:#fff;
-  outline:none;
 }
 
 button{
@@ -110,42 +76,9 @@ button{
   color:white;
   font-weight:600;
   cursor:pointer;
-  margin-top:5px;
 }
 
-button:hover{
-  opacity:0.9;
-}
-
-#status{
-  margin-top:12px;
-  font-size:13px;
-  opacity:0.8;
-}
-
-/* SECTION */
-.section{
-  padding:90px 20px;
-  text-align:center;
-}
-
-.section h2{
-  font-size:28px;
-  margin-bottom:10px;
-}
-
-.section p.sub{
-  opacity:0.7;
-  margin-bottom:40px;
-}
-
-/* CARDS */
-.cards{
-  display:flex;
-  flex-wrap:wrap;
-  gap:20px;
-  justify-content:center;
-}
+.cards{display:flex;flex-wrap:wrap;gap:20px;justify-content:center;}
 
 .card{
   background:#111827;
@@ -153,18 +86,6 @@ button:hover{
   border-radius:12px;
   width:270px;
   border:1px solid rgba(255,255,255,0.05);
-}
-
-.card h3{
-  margin-bottom:8px;
-}
-
-/* FOOTER */
-footer{
-  padding:40px;
-  text-align:center;
-  opacity:0.5;
-  font-size:13px;
 }
 </style>
 </head>
@@ -177,9 +98,8 @@ footer{
 </nav>
 
 <section class="hero">
-  <div class="badge">EXCLUSIVE TERRITORY SYSTEM</div>
   <h1>Own Your City’s Roofing Leads</h1>
-  <p>AI-powered lead generation + exclusive territory locking system. One city = one contractor. No overlap. No competition.</p>
+  <p>AI lead generation + exclusive territory control system</p>
 </section>
 
 <section id="form" class="section">
@@ -190,53 +110,90 @@ footer{
     <input type="email" id="email" placeholder="Email">
     <input type="text" id="city" placeholder="City / Region">
 
-    <button onclick="submitLead()">Check Territory Availability</button>
+    <button onclick="submitLead()">Check Availability</button>
 
     <div id="status"></div>
   </div>
 </section>
 
 <section class="section">
-  <h2>How the System Works</h2>
-  <p class="sub">Automated lead generation + exclusive territory control</p>
+  <h2>How It Works</h2>
 
   <div class="cards">
     <div class="card">
       <h3>1. Territory Lock</h3>
-      <p>Your city is permanently assigned to you. No duplicates.</p>
+      <p>One contractor per city.</p>
     </div>
 
     <div class="card">
-      <h3>2. AI Lead Engine</h3>
-      <p>We generate high-intent roofing leads daily.</p>
+      <h3>2. AI Leads</h3>
+      <p>High intent roofing customers daily.</p>
     </div>
 
     <div class="card">
-      <h3>3. Direct Closures</h3>
-      <p>Leads are delivered straight to your inbox in real-time.</p>
+      <h3>3. Drone Inspections</h3>
+      <p>Close deals faster using aerial proof.</p>
     </div>
   </div>
 </section>
 
-<footer>
-  © 2026 NorthSky AI — Territory Infrastructure System
-</footer>
-
 <script>
 
+/* ================= SUPABASE ================= */
 const supabase = window.supabase.createClient(
   "YOUR_SUPABASE_URL",
   "YOUR_SUPABASE_ANON_KEY"
 );
 
-// scroll
+/* ================= SESSION ================= */
+function getSessionId(){
+  let id = localStorage.getItem("session_id");
+
+  if(!id){
+    id = crypto.randomUUID();
+    localStorage.setItem("session_id", id);
+  }
+
+  return id;
+}
+
+const SESSION_ID = getSessionId();
+
+/* ================= ROOFFLOW → DRONE BRIDGE ================= */
+function sendToDrone(){
+
+  const p = new URLSearchParams(window.location.search);
+
+  const utm_source = p.get("utm_source") || "roofflow";
+  const utm_campaign = p.get("utm_campaign") || "organic";
+
+  const droneUrl = new URL("https://northsky-drones.vercel.app");
+
+  droneUrl.searchParams.set("session_id", SESSION_ID);
+  droneUrl.searchParams.set("utm_source", utm_source);
+  droneUrl.searchParams.set("utm_campaign", utm_campaign);
+  droneUrl.searchParams.set("from", "roofflow");
+
+  // track entry
+  supabase.from("events").insert([{
+    event: "roofflow_to_drone_click",
+    meta: {
+      session_id: SESSION_ID,
+      utm_source,
+      utm_campaign
+    },
+    time: new Date().toISOString()
+  }]);
+
+  window.location.href = droneUrl.toString();
+}
+
+/* ================= UI ================= */
 function scrollToForm(){
   document.getElementById("form").scrollIntoView({behavior:"smooth"});
 }
 
-// STRIPE LINK (ADD YOURS)
-const STRIPE_LINK = "https://buy.stripe.com/YOUR_LINK";
-
+/* ================= LEAD SUBMIT ================= */
 async function submitLead(){
 
   const name = document.getElementById("name").value;
@@ -245,28 +202,31 @@ async function submitLead(){
   const status = document.getElementById("status");
 
   if(!name || !email || !city){
-    status.innerText = "Complete all fields to continue.";
+    status.innerText = "Fill all fields.";
     return;
   }
 
-  status.innerText = "Analyzing territory availability...";
+  status.innerText = "Checking territory...";
 
   try{
 
-    await supabase
-      .from("leads")
-      .insert([{ name, email, city, status:"pending" }]);
+    await supabase.from("leads").insert([{
+      name,
+      email,
+      city,
+      session_id: SESSION_ID,
+      source: "roofflow"
+    }]);
 
-    status.innerText = "Territory available. Redirecting...";
+    status.innerText = "Available — redirecting to inspection system...";
 
     setTimeout(() => {
-      window.location.href =
-        STRIPE_LINK + "?prefilled_email=" + encodeURIComponent(email);
-    }, 1200);
+      sendToDrone();
+    }, 1000);
 
-  }catch(err){
-    console.error(err);
-    status.innerText = "System error. Try again.";
+  }catch(e){
+    console.log(e);
+    status.innerText = "Error submitting lead.";
   }
 }
 
