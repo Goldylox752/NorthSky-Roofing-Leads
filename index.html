@@ -209,6 +209,10 @@
     .plan-features li {
       margin: 0.4rem 0;
     }
+    .stripe-link {
+      text-decoration: none;
+      display: block;
+    }
 
     /* app dashboard */
     .dashboard {
@@ -285,11 +289,11 @@
     <div class="small-text">✨ Use the same email you used for purchase. A secure login link will be sent.</div>
   </div>
 
-  <!-- 💰 PAYWALL (subscription plans) -->
+  <!-- 💰 PAYWALL (subscription plans) with UPDATED STRIPE LINKS -->
   <div id="paywallSection" class="hidden" style="margin: 2rem 0;">
     <h2 style="text-align: center;">🚀 Unlock your territory license</h2>
     <div class="plans-grid">
-      <!-- Starter plan -->
+      <!-- Starter plan - $99/month -->
       <div class="plan-card">
         <div class="plan-title">Starter</div>
         <div class="plan-price">$99 <span style="font-size: 0.9rem;">/ month</span></div>
@@ -298,11 +302,11 @@
           <li>✓ Basic AI reports</li>
           <li>✓ Email support</li>
         </ul>
-        <a href="https://buy.stripe.com/dRmfZae1d2eoeofgLK2ZO0C?success_url=https://YOURDOMAIN.com/success.html" target="_blank" class="stripe-link">
+        <a href="https://buy.stripe.com/dRmfZae1d2eoeofgLK2ZO0C" target="_blank" class="stripe-link" data-plan="starter">
           <button>Get Starter</button>
         </a>
       </div>
-      <!-- Pro territory -->
+      <!-- Pro territory - $299/month -->
       <div class="plan-card pro">
         <div class="plan-title">Pro Territory</div>
         <div class="plan-price">$299 <span style="font-size: 0.9rem;">/ month</span></div>
@@ -312,11 +316,11 @@
           <li>✓ Priority lead scoring</li>
           <li>✓ Territory lock (radius)</li>
         </ul>
-        <a href="https://buy.stripe.com/dRm28k8GTaKU1Btcvu2ZO0D?success_url=https://YOURDOMAIN.com/success.html" target="_blank" class="stripe-link">
+        <a href="https://buy.stripe.com/dRm28k8GTaKU1Btcvu2ZO0D" target="_blank" class="stripe-link" data-plan="pro">
           <button>Upgrade to Pro</button>
         </a>
       </div>
-      <!-- Elite territory -->
+      <!-- Elite territory - $999/month -->
       <div class="plan-card elite">
         <div class="plan-title">Elite Territory</div>
         <div class="plan-price">$999 <span style="font-size: 0.9rem;">/ month</span></div>
@@ -326,7 +330,7 @@
           <li>✓ Dedicated account manager</li>
           <li>✓ Exclusive regional monopoly</li>
         </ul>
-        <a href="https://buy.stripe.com/aFaeV6cX97yIfsjcvu2ZO0E?success_url=https://YOURDOMAIN.com/success.html" target="_blank" class="stripe-link">
+        <a href="https://buy.stripe.com/aFaeV6cX97yIfsjcvu2ZO0E" target="_blank" class="stripe-link" data-plan="elite">
           <button>Unlock Elite</button>
         </a>
       </div>
@@ -652,7 +656,7 @@
   document.getElementById("manualRefreshPlanBtn")?.addEventListener("click", manualRefreshSubscription);
   document.getElementById("submitLeadBtn")?.addEventListener("click", submitLead);
 
-  // If supabase missing, show fallback note but still allow demo flow
+  // Set target="_blank" for all stripe links (already done, but ensure)
   window.addEventListener("DOMContentLoaded", () => {
     initAuth();
     handleRedirectFromEmail();
