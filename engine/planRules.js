@@ -12,7 +12,7 @@ export const PLAN_RULES = {
     max_agents: 5,
     maxLeadsPerDay: 100,
     priority: 2,
-    routing_mode: "balanced_routing"
+    routing_mode: "balanced"
   },
 
   elite: {
@@ -20,6 +20,6 @@ export const PLAN_RULES = {
     max_agents: 20,
     maxLeadsPerDay: 999,
     priority: 1,
-    routing_mode: "ai_priority_routing"
+    routing_mode: "ai_priority"
   }
 };
