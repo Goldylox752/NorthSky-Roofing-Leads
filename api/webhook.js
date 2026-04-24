@@ -1,54 +1,48 @@
+import express from "express";
 import Stripe from "stripe";
 
+const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// IMPORTANT: Stripe needs RAW body
+app.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    const sig = req.headers["stripe-signature"];
 
-async function buffer(readable) {
-  const chunks = [];
-  for await (const chunk of readable) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error("Webhook signature error:", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    switch (event.type) {
+      case "checkout.session.completed":
+        console.log("✅ Checkout completed:", event.data.object);
+        break;
+
+      case "payment_intent.succeeded":
+        console.log("💰 Payment succeeded:", event.data.object);
+        break;
+
+      default:
+        console.log("📩 Unhandled event:", event.type);
+    }
+
+    res.json({ received: true });
   }
-  return Buffer.concat(chunks);
-}
+);
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+const PORT = process.env.PORT || 3000;
 
-  const sig = req.headers["stripe-signature"];
-
-  let event;
-
-  try {
-    const rawBody = await buffer(req);
-
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  switch (event.type) {
-    case "checkout.session.completed":
-      console.log("Payment completed:", event.data.object);
-      break;
-
-    case "payment_intent.succeeded":
-      console.log("Payment succeeded");
-      break;
-
-    default:
-      console.log("Unhandled event:", event.type);
-  }
-
-  res.status(200).json({ received: true });
-}
+app.listen(PORT, () => {
+  console.log(`Stripe webhook running on port ${PORT}`);
+});
