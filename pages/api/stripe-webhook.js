@@ -1,3 +1,20 @@
+const eventId = event.id;
+
+const { data: exists } = await supabase
+  .from("stripe_events")
+  .select("id")
+  .eq("id", eventId)
+  .maybeSingle();
+
+if (exists) return res.json({ skipped: true });
+
+await supabase.from("stripe_events").insert({
+  id: eventId,
+  processed: true
+});
+
+
+
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
