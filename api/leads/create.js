@@ -7,31 +7,19 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const {
-      name,
-      phone,
-      city,
-      org_id,
-      source = "web"
-    } = req.body;
+    const { name, phone, city, org_id, source = "web" } = req.body;
 
-    // =========================
-    // 1. VALIDATION
-    // =========================
     if (!name || !phone || !org_id) {
-      return res.status(400).json({
-        error: "Missing required fields (name, phone, org_id)"
-      });
+      return res.status(400).json({ error: "Missing required fields" });
     }
 
     // =========================
-    // 2. DUPLICATE CHECK (anti spam)
+    // 1. DUPLICATE CHECK
     // =========================
     const { data: existing } = await supabase
       .from("leads")
@@ -49,9 +37,9 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // 3. CREATE LEAD
+    // 2. CREATE LEAD
     // =========================
-    const { data: lead, error } = await supabase
+    const { data: lead, error: leadError } = await supabase
       .from("leads")
       .insert({
         name,
@@ -66,45 +54,65 @@ export default async function handler(req, res) {
       .select()
       .single();
 
-    if (error) {
-      console.error("Lead insert error:", error);
-      return res.status(500).json({ error: "Failed to create lead" });
+    if (leadError) {
+      console.error(leadError);
+      return res.status(500).json({ error: "Lead creation failed" });
     }
 
     // =========================
-    // 4. ASSIGN LEAD (CORE ENGINE)
+    // 3. ASSIGNMENT ENGINE (SAFE)
     // =========================
-    let agent = null;
+    let assignment = null;
 
     try {
-      agent = await assignLead(lead);
+      assignment = await assignLead({
+        lead,
+        org_id,
+        supabase
+      });
+
     } catch (err) {
       console.error("Assignment failed:", err);
+
+      // fallback state (IMPORTANT)
+      await supabase.from("leads").update({
+        status: "unassigned"
+      }).eq("id", lead.id);
     }
 
     // =========================
-    // 5. REALTIME PUSH (dashboard update)
+    // 4. SAVE ASSIGNMENT
     // =========================
-    await supabase.channel("queue_updates").send({
-      type: "broadcast",
-      event: "lead_assigned",
+    if (assignment?.agent_id) {
+      await supabase.from("assignments").insert({
+        lead_id: lead.id,
+        agent_id: assignment.agent_id,
+        org_id,
+        status: "active",
+        created_at: new Date().toISOString()
+      });
+    }
+
+    // =========================
+    // 5. REALTIME EVENT
+    // =========================
+    await supabase.from("events").insert({
+      type: "lead_assigned",
+      org_id,
       payload: {
         lead,
-        agent
+        assignment
       }
     });
 
-    // =========================
-    // 6. RESPONSE
-    // =========================
     return res.status(200).json({
       success: true,
       lead,
-      assigned_to: agent?.name || null
+      assigned_to: assignment?.agent_name || null
     });
 
   } catch (err) {
-    console.error("Fatal lead create error:", err);
+    console.error(err);
 
     return res.status(500).json({
       error: "Internal server error"
