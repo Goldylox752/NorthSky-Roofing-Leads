@@ -1,27 +1,79 @@
-import { PLAN_RULES } from "../../engine/planRules";
+import { stripe } from "../lib/stripe";
 
-export function getPlanFromSession(session) {
-  // 1. STRIPE TRUTH LAYER (PRIMARY)
-  const linkId =
-    session.payment_link ||
-    session.payment_link_id;
-
-  const planFromStripe = Object.entries(PLAN_RULES).find(
-    ([plan, config]) => config.stripeLink === linkId
-  );
-
-  if (planFromStripe) {
-    return planFromStripe[0];
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      error: "Method not allowed"
+    });
   }
 
-  // 2. FALLBACK (ONLY FOR EDGE CASES / LOGGING)
-  const metaPlan = session.metadata?.plan;
+  try {
+    const { email, plan = "starter" } = req.body;
 
-  if (metaPlan && PLAN_RULES[metaPlan]) {
-    console.warn("⚠️ fallback plan used:", metaPlan);
-    return metaPlan;
+    if (!email) {
+      return res.status(400).json({
+        error: "Email required"
+      });
+    }
+
+    // Optional: dynamic pricing by plan
+    const pricing = {
+      starter: 49700,
+      growth: 99700,
+      elite: 149700
+    };
+
+    const amount = pricing[plan] || pricing.starter;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+
+      payment_method_types: ["card"],
+
+      customer_email: email,
+
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+
+            product_data: {
+              name: `NorthSky AI Roofing Leads (${plan})`
+            },
+
+            unit_amount: amount,
+
+            recurring: {
+              interval: "month"
+            }
+          },
+
+          quantity: 1
+        }
+      ],
+
+      metadata: {
+        email,
+        plan
+      },
+
+      success_url:
+        `https://northskyflowai.vercel.app/success?session_id={CHECKOUT_SESSION_ID}`,
+
+      cancel_url:
+        `https://northskyflowai.vercel.app/cancel`
+    });
+
+    return res.status(200).json({
+      id: session.id,
+      url: session.url
+    });
+
+  } catch (err) {
+    console.error("Checkout Error:", err);
+
+    return res.status(500).json({
+      error: "Checkout failed"
+    });
   }
-
-  // 3. SAFE DEFAULT
-  return "starter";
 }
