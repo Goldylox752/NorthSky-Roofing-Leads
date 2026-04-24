@@ -1,44 +1,26 @@
-import { stripe } from "../lib/stripe";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  const { plan, userId } = req.body;
 
-  try {
-    const { email } = req.body;
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price: process.env[`STRIPE_PRICE_${plan.toUpperCase()}`],
+        quantity: 1
+      }
+    ],
+    metadata: {
+      user_id: userId,
+      plan
+    },
+    success_url: `${process.env.DOMAIN}/dashboard?success=1`,
+    cancel_url: `${process.env.DOMAIN}/pricing`
+  });
 
-    if (!email) {
-      return res.status(400).json({ error: "Email required" });
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: "NorthSky AI Roofing Leads",
-            },
-            unit_amount: 49700,
-            recurring: {
-              interval: "month",
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      metadata: { email },
-      success_url: "https://northskyflowai.vercel.app/success",
-      cancel_url: "https://northskyflowai.vercel.app/cancel",
-    });
-
-    return res.status(200).json({ id: session.id });
-
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Checkout failed" });
-  }
+  res.json({ url: session.url });
 }
