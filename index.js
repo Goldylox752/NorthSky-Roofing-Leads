@@ -1,32 +1,5 @@
-window.NorthSkyOS = {
-  track(event, data) {
-    fetch("https://your-api.com/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event,
-        data,
-        session: localStorage.getItem("ns_session_id"),
-        user: localStorage.getItem("ns_user_id"),
-        score: localStorage.getItem("ns_score"),
-        url: location.href
-      })
-    });
-  },
-
-  route(score) {
-    if (score >= 15) {
-      window.location.href = "https://goldylox752.github.io/RoofFlow-AI/";
-    }
-  }
-};
-
-
-
-
 /* =========================================
-   NORTHSKY AI - SECURE ENGINE
-   index.js (AUTH + PAYMENT VERIFIED)
+   NORTHSKY OS - CORE ENGINE (PRODUCTION)
 ========================================= */
 
 /* ========== CONFIG ========== */
@@ -36,14 +9,16 @@ const CONFIG = {
   DRONE_URL: "https://northsky-drones.vercel.app"
 };
 
-let supabase = null;
+/* ========== GLOBAL STATE ========== */
+let supabase;
 let currentUser = null;
+let userPlan = null;
 
-/* ========== INIT ========== */
+/* ========== INIT SYSTEM ========== */
 (async function init() {
 
   if (!window.supabase) {
-    console.error("❌ Supabase not loaded");
+    console.error("Supabase not loaded");
     return;
   }
 
@@ -52,48 +27,59 @@ let currentUser = null;
     CONFIG.SUPABASE_KEY
   );
 
-  console.log("✅ Supabase connected");
-
-  // check auth session
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
-    console.log("🔒 No user session");
-    return; // user not logged in
+    console.log("No session");
+    return;
   }
 
   currentUser = user;
 
-  console.log("👤 Logged in:", user.email);
+  await loadUserAccess(user.email);
 
-  // verify paid access
-  const { data, error } = await supabase
-    .from("users")
-    .select("paid, plan")
-    .eq("email", user.email)
-    .single();
-
-  if (error || !data || !data.paid) {
-    console.warn("🚫 No paid access");
+  if (userPlan?.paid !== true) {
+    console.log("Access blocked (unpaid)");
     return;
   }
 
-  console.log("🔓 Paid access confirmed:", data.plan);
+  unlockApp();
 
-  // unlock UI
+})();
+
+/* ========== LOAD USER FROM DB ========== */
+async function loadUserAccess(email) {
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("paid, plan")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("DB error:", error);
+    userPlan = { paid: false };
+    return;
+  }
+
+  userPlan = data || { paid: false };
+
+  console.log("User plan:", userPlan);
+}
+
+/* ========== UNLOCK APP ========== */
+function unlockApp() {
+
   const paywall = document.getElementById("paywall");
   const app = document.getElementById("app");
 
   if (paywall) paywall.style.display = "none";
   if (app) app.classList.remove("hidden");
 
-  // expose submit only AFTER auth
   window.submitLead = submitLead;
+}
 
-})();
-    
-
-/* ========== SESSION (OPTIONAL TRACKING) ========== */
+/* ========== SESSION ID ========== */
 function sessionId() {
   let id = localStorage.getItem("session_id");
 
@@ -105,80 +91,84 @@ function sessionId() {
   return id;
 }
 
-
-/* ========== LOGIN (MAGIC LINK) ========== */
+/* ========== LOGIN ========== */
 async function login(email) {
 
-  if (!email) {
-    alert("Enter email");
-    return;
-  }
+  if (!email) return alert("Enter email");
 
   const { error } = await supabase.auth.signInWithOtp({
-    email: email
+    email
   });
 
   if (error) {
-    alert("Login failed");
     console.error(error);
-    return;
+    return alert("Login failed");
   }
 
-  alert("Check your email for login link");
+  alert("Check email for login link");
 }
 
 window.login = login;
 
-
-/* ========== LEAD SUBMIT (SECURE) ========== */
+/* ========== LEAD SUBMISSION ========== */
 async function submitLead() {
 
   if (!currentUser) {
-    alert("You must be logged in");
+    alert("Login required");
     return;
   }
 
-  const nameEl = document.getElementById("name");
-  const emailEl = document.getElementById("email");
-  const cityEl = document.getElementById("city");
-
-  if (!nameEl || !emailEl || !cityEl) {
-    alert("Missing form fields");
+  if (!userPlan?.paid) {
+    alert("Upgrade required");
     return;
   }
 
-  const name = nameEl.value.trim();
-  const email = emailEl.value.trim();
-  const city = cityEl.value.trim();
+  const name = document.getElementById("name")?.value?.trim();
+  const email = document.getElementById("email")?.value?.trim();
+  const city = document.getElementById("city")?.value?.trim();
 
   if (!name || !email || !city) {
     alert("Fill all fields");
     return;
   }
 
-  const payload = {
+  const lead = {
     name,
     email,
     city,
     user_email: currentUser.email,
     session_id: sessionId(),
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    plan: userPlan.plan || "unknown"
   };
 
-  console.log("📩 Lead captured", payload);
-
-  const { error } = await supabase.from("leads").insert([payload]);
+  const { error } = await supabase.from("leads").insert([lead]);
 
   if (error) {
-    console.error("❌ Insert failed", error);
-    alert("Error submitting. Try again.");
-    return;
+    console.error("Insert error:", error);
+    return alert("Failed to submit lead");
   }
 
-  console.log("✅ Lead saved");
+  // tracking hook (safe)
+  trackEvent("lead_created", lead);
 
-  // redirect to drone upsell
-  setTimeout(() => {
-    window.location.href = CONFIG.DRONE_URL + "?bundle=inspection-kit";
-  }, 800);
+  window.location.href = CONFIG.DRONE_URL + "?bundle=inspection-kit";
 }
+
+/* ========== TRACKING SYSTEM ========== */
+function trackEvent(event, data = {}) {
+  fetch("/api/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      event,
+      data,
+      user: currentUser?.email,
+      session: sessionId(),
+      url: location.href,
+      ts: Date.now()
+    })
+  }).catch(() => {});
+}
+
+window.trackEvent = trackEvent;
