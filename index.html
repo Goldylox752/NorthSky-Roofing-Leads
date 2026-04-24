@@ -1,764 +1,207 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>NorthSky AI 2026 | Roofing Intelligence Platform</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RoofFlow | Booked Roofing Jobs System</title>
 
-    body {
-      font-family: 'Inter', sans-serif;
-      background: radial-gradient(ellipse at 30% 20%, #0a0f2a, #02040e);
-      color: #eef2ff;
-      min-height: 100vh;
-      line-height: 1.5;
-    }
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
-    .glass-card {
-      background: rgba(15, 23, 42, 0.7);
-      backdrop-filter: blur(14px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 2rem;
-      box-shadow: 0 20px 35px -12px rgba(0, 0, 0, 0.4);
-    }
+<style>
+body {
+  font-family: Inter, sans-serif;
+  margin: 0;
+  background: #0b1220;
+  color: #fff;
+}
 
-    .container {
-      max-width: 1280px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
+.container {
+  max-width: 1100px;
+  margin: auto;
+  padding: 40px 20px;
+}
 
-    nav {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1.2rem 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      flex-wrap: wrap;
-      gap: 1rem;
-    }
-    .logo {
-      font-size: 1.6rem;
-      font-weight: 800;
-      background: linear-gradient(135deg, #fff, #60a5fa);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      letter-spacing: -0.3px;
-    }
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      background: rgba(255,255,255,0.05);
-      padding: 0.4rem 1rem;
-      border-radius: 3rem;
-      font-size: 0.85rem;
-    }
-    .logout-btn {
-      background: none;
-      border: 1px solid rgba(255,100,100,0.5);
-      padding: 0.3rem 0.9rem;
-      border-radius: 2rem;
-      font-size: 0.7rem;
-      font-weight: 500;
-      cursor: pointer;
-      color: #fca5a5;
-      transition: 0.2s;
-    }
-    .logout-btn:hover {
-      background: #ef444420;
-      border-color: #ef4444;
-    }
+.hero {
+  text-align: center;
+  padding: 60px 20px;
+}
 
-    .hero {
-      text-align: center;
-      padding: 3rem 1rem 2rem;
-    }
-    .hero h1 {
-      font-size: 3rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      background: linear-gradient(to right, #ffffff, #a5b4fc);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
-    .hero p {
-      opacity: 0.7;
-      max-width: 600px;
-      margin: 1rem auto 0;
-    }
+h1 {
+  font-size: 42px;
+  font-weight: 800;
+}
 
-    .auth-panel {
-      max-width: 460px;
-      margin: 2rem auto;
-      padding: 2rem;
-      border-radius: 1.8rem;
-      background: rgba(10, 15, 35, 0.7);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.1);
-    }
-    .input-group {
-      margin-bottom: 1.2rem;
-    }
-    input, .stripe-button-stub {
-      width: 100%;
-      padding: 0.9rem 1rem;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 1.2rem;
-      color: white;
-      font-size: 0.95rem;
-      transition: 0.2s;
-    }
-    input:focus {
-      outline: none;
-      border-color: #4f46e5;
-      box-shadow: 0 0 0 2px #4f46e540;
-    }
-    button {
-      width: 100%;
-      padding: 0.9rem;
-      background: #4f46e5;
-      border: none;
-      border-radius: 1.2rem;
-      font-weight: 700;
-      color: white;
-      cursor: pointer;
-      transition: 0.2s;
-      font-size: 0.95rem;
-    }
-    button:hover {
-      background: #6366f1;
-      transform: scale(0.98);
-    }
-    .btn-outline {
-      background: transparent;
-      border: 1px solid #4f46e5;
-      color: #c7d2fe;
-    }
-    .small-text {
-      font-size: 0.7rem;
-      opacity: 0.6;
-      margin-top: 1rem;
-      text-align: center;
-    }
-    .error-msg {
-      color: #f87171;
-      font-size: 0.75rem;
-      margin-top: 0.4rem;
-    }
-    .success-msg {
-      color: #4ade80;
-    }
+p {
+  opacity: 0.8;
+  max-width: 700px;
+  margin: auto;
+}
 
-    .plans-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.8rem;
-      justify-content: center;
-      margin: 2rem 0;
-    }
-    .plan-card {
-      flex: 1;
-      min-width: 240px;
-      background: rgba(15, 23, 42, 0.8);
-      backdrop-filter: blur(8px);
-      border-radius: 1.8rem;
-      padding: 1.6rem;
-      border: 1px solid rgba(255,255,255,0.08);
-      transition: all 0.2s;
-    }
-    .plan-card.pro {
-      border: 2px solid #4f46e5;
-      transform: scale(1.02);
-      background: rgba(79, 70, 229, 0.1);
-    }
-    .plan-card.elite {
-      border: 2px solid #22c55e;
-    }
-    .plan-title {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-    }
-    .plan-price {
-      font-size: 1.8rem;
-      font-weight: 800;
-      margin: 0.8rem 0;
-    }
-    .plan-features {
-      font-size: 0.8rem;
-      opacity: 0.8;
-      margin: 1rem 0;
-      list-style: none;
-    }
-    .plan-features li {
-      margin: 0.4rem 0;
-    }
-    .stripe-link {
-      text-decoration: none;
-      display: block;
-    }
+.card {
+  background: #121a2b;
+  border: 1px solid #24314d;
+  border-radius: 16px;
+  padding: 25px;
+  margin: 20px 0;
+}
 
-    .dashboard {
-      max-width: 700px;
-      margin: 2rem auto;
-      padding: 2rem;
-      border-radius: 2rem;
-    }
-    .dashboard h2 {
-      font-size: 1.8rem;
-      margin-bottom: 1rem;
-    }
-    .status-badge {
-      background: #22c55e20;
-      border: 1px solid #22c55e;
-      border-radius: 2rem;
-      padding: 0.2rem 1rem;
-      font-size: 0.7rem;
-      display: inline-block;
-      margin-bottom: 1rem;
-    }
-    .refresh-sub {
-      background: #334155;
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-    }
-    .hidden {
-      display: none;
-    }
-    .loader {
-      border: 2px solid rgba(255,255,255,0.2);
-      border-top: 2px solid #4f46e5;
-      border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      animation: spin 0.8s linear infinite;
-      display: inline-block;
-      margin-right: 6px;
-    }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
 
-    /* modal */
-    .modal {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: rgba(0,0,0,0.8);
-      backdrop-filter: blur(10px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .modal-card {
-      background: #0f172a;
-      border-radius: 2rem;
-      max-width: 450px;
-      width: 90%;
-      padding: 2rem;
-      text-align: center;
-      border: 1px solid #4f46e5;
-    }
-    footer {
-      text-align: center;
-      padding: 2rem;
-      opacity: 0.5;
-      font-size: 0.7rem;
-    }
-    @media (max-width: 720px) {
-      .hero h1 { font-size: 2rem; }
-      .plans-grid { flex-direction: column; }
-    }
-  </style>
+.price {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.btn {
+  background: #4f46e5;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.btn:hover {
+  background: #6366f1;
+}
+
+.small {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.highlight {
+  color: #60a5fa;
+}
+
+.section-title {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+ul {
+  padding-left: 20px;
+  opacity: 0.9;
+}
+
+.footer {
+  text-align: center;
+  opacity: 0.5;
+  font-size: 12px;
+  margin-top: 40px;
+}
+</style>
 </head>
+
 <body>
 
 <div class="container">
-  <nav>
-    <div class="logo">⛅ NorthSky AI 2026</div>
-    <div id="navUserArea"></div>
-  </nav>
 
-  <div class="hero">
-    <h1>Turn Roof Inspections Into $1K–$5K Jobs</h1>
-    <p>AI‑powered leads + drone intelligence · exclusive territories for certified contractors</p>
-  </div>
-
-  <!-- LOGIN SECTION -->
-  <div id="authSection" class="auth-panel">
-    <h3 style="margin-bottom: 1rem; text-align: center;">🔑 Access your territory hub</h3>
-    <div class="input-group">
-      <input type="email" id="loginEmail" placeholder="Contractor email address">
-    </div>
-    <button id="sendMagicLinkBtn">📩 Send magic link</button>
-    <div id="authMessage" class="small-text" style="margin-top: 1rem;"></div>
-    <div class="small-text">✨ Use the same email you used for purchase. A secure login link will be sent.</div>
-  </div>
-
-  <!-- PAYWALL with FIXED buy links (mock checkout) -->
-  <div id="paywallSection" class="hidden" style="margin: 2rem 0;">
-    <h2 style="text-align: center;">🚀 Unlock your territory license</h2>
-    <div class="plans-grid">
-      <div class="plan-card">
-        <div class="plan-title">Starter</div>
-        <div class="plan-price">$99 <span style="font-size: 0.9rem;">/ month</span></div>
-        <ul class="plan-features">
-          <li>✓ 5 inspections / month</li>
-          <li>✓ Basic AI reports</li>
-          <li>✓ Email support</li>
-        </ul>
-        <button class="buy-now-btn" data-plan="starter">Get Starter →</button>
-      </div>
-      <div class="plan-card pro">
-        <div class="plan-title">Pro Territory</div>
-        <div class="plan-price">$299 <span style="font-size: 0.9rem;">/ month</span></div>
-        <ul class="plan-features">
-          <li>✓ 20 inspections / month</li>
-          <li>✓ Drone route optimization</li>
-          <li>✓ Priority lead scoring</li>
-          <li>✓ Territory lock (radius)</li>
-        </ul>
-        <button class="buy-now-btn" data-plan="pro">Upgrade to Pro →</button>
-      </div>
-      <div class="plan-card elite">
-        <div class="plan-title">Elite Territory</div>
-        <div class="plan-price">$999 <span style="font-size: 0.9rem;">/ month</span></div>
-        <ul class="plan-features">
-          <li>✓ Unlimited inspections</li>
-          <li>✓ Full AI auditor suite</li>
-          <li>✓ Dedicated account manager</li>
-          <li>✓ Exclusive regional monopoly</li>
-        </ul>
-        <button class="buy-now-btn" data-plan="elite">Unlock Elite →</button>
-      </div>
-    </div>
-    <div class="small-text" style="text-align: center; margin-top: 1rem;">
-      ⚡ After payment, your subscription will be activated automatically.
-    </div>
-    <div style="display: flex; justify-content: center; margin-top: 0.5rem;">
-      <button id="manualRefreshPlanBtn" class="refresh-sub" style="width: auto; padding: 0.6rem 1.5rem;">⟳ Refresh subscription status</button>
-    </div>
-    <div id="paywallMessage" class="small-text" style="text-align: center; margin-top: 0.5rem;"></div>
-  </div>
-
-  <!-- MAIN APP (territory locking) -->
-  <div id="appSection" class="dashboard glass-card hidden">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-      <h2>🏆 Lock Your Territory</h2>
-      <span id="planBadge" class="status-badge">—</span>
-    </div>
-    <p style="margin-bottom: 1.5rem; opacity: 0.7;">Enter property details to claim inspection lead & send to drone dispatch.</p>
-    <div class="input-group">
-      <input type="text" id="leadName" placeholder="Property owner / full name">
-    </div>
-    <div class="input-group">
-      <input type="email" id="leadEmail" placeholder="Client email">
-    </div>
-    <div class="input-group">
-      <input type="text" id="leadCity" placeholder="City, State or ZIP">
-    </div>
-    <button id="submitLeadBtn">🔍 Check availability & reserve territory</button>
-    <div id="leadStatus" style="margin-top: 1rem; font-size: 0.85rem; text-align: center;"></div>
-    <hr style="margin: 1.8rem 0; border-color: rgba(255,255,255,0.1);">
-    <div style="font-size: 0.75rem; text-align: center; opacity: 0.6;">
-      <i class="info-icon">⛅</i> Each submission reserves an exclusive lead in your territory. Pro+ users get priority routing.
-    </div>
-  </div>
-
-  <footer>
-    NorthSky AI — contractor intelligence platform. ⚡ Secure & encrypted.
-  </footer>
+<!-- HERO / STORY -->
+<div class="hero">
+  <h1>We Book Roofing Jobs — Not Just Leads</h1>
+  <p>
+    RoofFlow helps roofing contractors get <span class="highlight">qualified homeowners booked directly into their calendar</span> using structured intake + follow-up systems.
+  </p>
 </div>
 
-<script>
-  // ======================== CONFIGURATION ========================
-  // 🔧 REPLACE WITH YOUR SUPABASE CREDENTIALS (from project settings)
-  const SUPABASE_URL = "YOUR_SUPABASE_URL";        // e.g. "https://xxxxx.supabase.co"
-  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+<!-- PROBLEM -->
+<div class="card">
+  <div class="section-title">The Real Problem</div>
+  <p>
+    Most roofing companies don’t struggle to get leads — they struggle to respond fast enough and follow up properly before jobs are lost.
+  </p>
+  <ul>
+    <li>Leads go cold in minutes</li>
+    <li>Homeowners contact multiple contractors</li>
+    <li>Missed calls = lost revenue</li>
+  </ul>
+</div>
 
-  const isSupabaseConfigured = SUPABASE_URL !== "YOUR_SUPABASE_URL" && SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY";
-  let supabase;
-  if (isSupabaseConfigured) {
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  } else {
-    console.warn("⚠️ Supabase credentials missing. Using demo mode (localStorage only).");
-  }
+<!-- SOLUTION -->
+<div class="card">
+  <div class="section-title">What RoofFlow Does</div>
+  <p>
+    RoofFlow is a structured booking system that captures homeowner requests and turns them into scheduled roofing appointments.
+  </p>
+  <ul>
+    <li>Lead intake system</li>
+    <li>Call center qualification</li>
+    <li>Appointment booking into your calendar</li>
+  </ul>
+</div>
 
-  // Global state
-  let currentSession = null;
-  let currentPlan = null;
-  let isPaid = false;
+<!-- PROOF -->
+<div class="card">
+  <div class="section-title">How It Works</div>
+  <ul>
+    <li>1. Homeowner submits roofing request</li>
+    <li>2. Our team qualifies the job (budget + urgency)</li>
+    <li>3. Appointment is booked directly into contractor schedule</li>
+  </ul>
+  <p class="small">
+    *Example workflow based on contractor pipeline structure (screenshots / case studies can be added later).
+  </p>
+</div>
 
-  // DOM elements
-  const authSection = document.getElementById("authSection");
-  const paywallSection = document.getElementById("paywallSection");
-  const appSection = document.getElementById("appSection");
-  const navUserArea = document.getElementById("navUserArea");
-  const authMessageDiv = document.getElementById("authMessage");
-  const paywallMessageDiv = document.getElementById("paywallMessage");
-  const leadStatusDiv = document.getElementById("leadStatus");
-  const planBadgeSpan = document.getElementById("planBadge");
+<!-- PRICING -->
+<div class="card">
+  <div class="section-title">Get Booked Roofing Jobs</div>
 
-  // ---------- MOCK CHECKOUT (FIXED BUY LINKS) ----------
-  function showMockPurchase(planName) {
-    const modalDiv = document.createElement('div');
-    modalDiv.className = 'modal';
-    modalDiv.innerHTML = `
-      <div class="modal-card">
-        <i class="fas fa-credit-card" style="font-size: 3rem; color:#4f46e5;"></i>
-        <h2 style="margin:1rem 0">Secure Checkout 2026</h2>
-        <p>Plan: <strong>${planName}</strong><br>Price: ${planName === 'starter' ? '$99' : (planName === 'pro' ? '$299' : '$999')}/month</p>
-        <div style="background:#1e293b; padding:1rem; border-radius:1rem; margin:1rem 0;">
-          <i class="fas fa-lock"></i> Demo payment gateway (simulated)
-        </div>
-        <button id="mockPayBtn" class="buy-now-btn" style="width:auto; margin:0.5rem">Complete Payment →</button>
-        <button id="closeModalBtn" class="refresh-sub" style="background:#475569; margin-top:0.5rem;">Cancel</button>
-      </div>
-    `;
-    document.body.appendChild(modalDiv);
+  <div class="grid">
 
-    document.getElementById('mockPayBtn').addEventListener('click', async () => {
-      // Simulate successful payment
-      modalDiv.remove();
-      paywallMessageDiv.innerHTML = "⏳ Processing payment & activating license...";
-      
-      // Update subscription in database or demo
-      await activateSubscription(planName);
-      
-      paywallMessageDiv.innerHTML = "✅ Subscription activated! Redirecting to dashboard...";
-      setTimeout(() => refreshUIAfterAuth(), 1000);
-    });
-    document.getElementById('closeModalBtn').addEventListener('click', () => modalDiv.remove());
-  }
+    <div class="card">
+      <div class="section-title">Starter</div>
+      <div class="price">$99/mo</div>
+      <ul>
+        <li>5 booked jobs/month</li>
+        <li>Basic intake system</li>
+      </ul>
+      <button class="btn">Get Starter</button>
+    </div>
 
-  async function activateSubscription(plan) {
-    if (!currentSession) {
-      // Not logged in: store in localStorage for demo, but require login first
-      alert("Please login first (or use Demo Access) before purchasing.");
-      return;
-    }
-    
-    if (supabase && isSupabaseConfigured) {
-      // Update Supabase users table
-      const { error } = await supabase
-        .from("users")
-        .upsert({ email: currentSession.email, paid: true, plan: plan }, { onConflict: "email" });
-      if (error) {
-        console.error("Supabase update error:", error);
-        // Fallback to localStorage
-        localStorage.setItem("ns_demo_subscription", JSON.stringify({ email: currentSession.email, plan, paid: true }));
-      } else {
-        console.log("Subscription saved to Supabase");
-      }
-    } else {
-      // Demo mode: store in localStorage
-      localStorage.setItem("ns_demo_subscription", JSON.stringify({ email: currentSession.email, plan, paid: true }));
-    }
-    
-    // Refresh local state
-    await fetchUserSubscription();
-  }
+    <div class="card">
+      <div class="section-title">Pro</div>
+      <div class="price">$299/mo</div>
+      <ul>
+        <li>15–30 booked jobs/month</li>
+        <li>Priority qualification</li>
+      </ul>
+      <button class="btn">Get Pro</button>
+    </div>
 
-  // ---------- AUTH & SUBSCRIPTION ----------
-  async function fetchUserSubscription() {
-    if (!currentSession) {
-      isPaid = false;
-      currentPlan = null;
-      return;
-    }
-    
-    // Check demo/localStorage first (for non-Supabase or fallback)
-    const demoSub = localStorage.getItem("ns_demo_subscription");
-    if (demoSub && !isSupabaseConfigured) {
-      try {
-        const sub = JSON.parse(demoSub);
-        if (sub.email === currentSession.email && sub.paid) {
-          isPaid = true;
-          currentPlan = sub.plan;
-          return;
-        }
-      } catch(e) {}
-    }
-    
-    if (!supabase || !isSupabaseConfigured) {
-      isPaid = false;
-      currentPlan = null;
-      return;
-    }
-    
-    try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("paid, plan")
-        .eq("email", currentSession.email)
-        .maybeSingle();
-        
-      if (error && error.code !== "PGRST116") {
-        console.error("DB fetch error:", error);
-        isPaid = false;
-        return;
-      }
-      if (data) {
-        isPaid = !!data.paid;
-        currentPlan = data.plan || null;
-      } else {
-        // Create user record
-        await supabase.from("users").insert([{ email: currentSession.email, paid: false, plan: null }]);
-        isPaid = false;
-        currentPlan = null;
-      }
-    } catch (err) {
-      console.warn("Subscription check failed", err);
-      isPaid = false;
-    }
-  }
+    <div class="card">
+      <div class="section-title">Elite</div>
+      <div class="price">$999/mo</div>
+      <ul>
+        <li>High volume territories</li>
+        <li>Dedicated booking support</li>
+      </ul>
+      <button class="btn">Get Elite</button>
+    </div>
 
-  async function refreshUIAfterAuth() {
-    if (!currentSession) {
-      authSection.classList.remove("hidden");
-      paywallSection.classList.add("hidden");
-      appSection.classList.add("hidden");
-      renderNavLoggedOut();
-      return;
-    }
-    
-    await fetchUserSubscription();
-    
-    if (isPaid && currentPlan) {
-      authSection.classList.add("hidden");
-      paywallSection.classList.add("hidden");
-      appSection.classList.remove("hidden");
-      renderNavLoggedIn();
-      updatePlanBadge();
-    } else {
-      authSection.classList.add("hidden");
-      paywallSection.classList.remove("hidden");
-      appSection.classList.add("hidden");
-      renderNavLoggedIn();
-      paywallMessageDiv.innerHTML = "⚠️ No active subscription. Choose a plan below to unlock the dashboard.";
-    }
-  }
-  
-  function updatePlanBadge() {
-    if (!currentPlan) planBadgeSpan.innerText = "⚡ No active license";
-    else if (currentPlan === "pro") planBadgeSpan.innerText = "🏅 PRO TERRITORY ACTIVE";
-    else if (currentPlan === "elite") planBadgeSpan.innerText = "👑 ELITE TERRITORY · UNLIMITED";
-    else planBadgeSpan.innerText = "🌱 STARTER PLAN";
-  }
-  
-  function renderNavLoggedOut() {
-    navUserArea.innerHTML = `<div class="user-info">🔓 Not logged in</div>`;
-  }
-  
-  function renderNavLoggedIn() {
-    if (!currentSession) return;
-    const emailShort = currentSession.email?.split('@')[0] || "user";
-    navUserArea.innerHTML = `
-      <div class="user-info">
-        <span>👤 ${emailShort}</span>
-        <button class="logout-btn" id="logoutBtn">Sign out</button>
-      </div>
-    `;
-    document.getElementById("logoutBtn")?.addEventListener("click", async () => {
-      if (supabase) await supabase.auth.signOut();
-      localStorage.removeItem("ns_demo_subscription");
-      currentSession = null;
-      isPaid = false;
-      currentPlan = null;
-      refreshUIAfterAuth();
-    });
-  }
-  
-  async function manualRefreshSubscription() {
-    if (!currentSession) {
-      if (paywallMessageDiv) paywallMessageDiv.innerText = "Please login first.";
-      return;
-    }
-    paywallMessageDiv.innerText = "⟳ Refreshing subscription...";
-    await fetchUserSubscription();
-    if (isPaid) {
-      paywallMessageDiv.innerHTML = "✅ Subscription active! Redirecting to dashboard...";
-      setTimeout(() => refreshUIAfterAuth(), 800);
-    } else {
-      paywallMessageDiv.innerHTML = "❌ No active plan yet. Complete payment using the buttons above.";
-    }
-  }
-  
-  // Magic link login
-  async function sendMagicLink() {
-    const emailInput = document.getElementById("loginEmail");
-    const email = emailInput.value.trim();
-    if (!email) {
-      authMessageDiv.innerHTML = "<span class='error-msg'>Enter your email address</span>";
-      return;
-    }
-    if (!supabase) {
-      authMessageDiv.innerHTML = "<span class='error-msg'>Supabase not configured. Use 'Demo Access' button below.</span>";
-      return;
-    }
-    authMessageDiv.innerHTML = "<span>Sending magic link... <div class='loader' style='vertical-align:middle'></div></span>";
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email,
-      options: { emailRedirectTo: window.location.href }
-    });
-    if (error) {
-      authMessageDiv.innerHTML = `<span class='error-msg'>Error: ${error.message}</span>`;
-    } else {
-      authMessageDiv.innerHTML = "<span class='success-msg'>✨ Magic link sent! Check your inbox (spam too).</span>";
-    }
-  }
-  
-  // Lead submission (territory lock)
-  async function submitLead() {
-    if (!currentSession) {
-      leadStatusDiv.innerHTML = "<span class='error-msg'>Please login first.</span>";
-      return;
-    }
-    if (!isPaid) {
-      leadStatusDiv.innerHTML = "<span class='error-msg'>Active subscription required to lock territory. Upgrade above.</span>";
-      return;
-    }
-    const name = document.getElementById("leadName").value.trim();
-    const email = document.getElementById("leadEmail").value.trim();
-    const city = document.getElementById("leadCity").value.trim();
-    if (!name || !email || !city) {
-      leadStatusDiv.innerHTML = "<span class='error-msg'>All fields required.</span>";
-      return;
-    }
-    leadStatusDiv.innerHTML = "<span>Reserving territory... <div class='loader'></div></span>";
-    let sessionId = localStorage.getItem("ns_territory_session");
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      localStorage.setItem("ns_territory_session", sessionId);
-    }
-    
-    if (!supabase || !isSupabaseConfigured) {
-      // Demo mode
-      const lead = { name, email, city, user_email: currentSession.email, session_id: sessionId, timestamp: new Date().toISOString() };
-      let demoLeads = JSON.parse(localStorage.getItem("demo_leads") || "[]");
-      demoLeads.push(lead);
-      localStorage.setItem("demo_leads", JSON.stringify(demoLeads));
-      leadStatusDiv.innerHTML = "<span class='success-msg'>✅ Territory reserved (demo mode). Redirecting to drone portal...</span>";
-      setTimeout(() => {
-        window.location.href = "https://northsky-drones.vercel.app?bundle=inspection-kit";
-      }, 1200);
-      return;
-    }
-    
-    const { error } = await supabase.from("leads").insert([{
-      name, email, city,
-      user_email: currentSession.email,
-      session_id: sessionId,
-      plan_at_submission: currentPlan || "unknown"
-    }]);
-    if (error) {
-      leadStatusDiv.innerHTML = `<span class='error-msg'>Database error: ${error.message}</span>`;
-    } else {
-      leadStatusDiv.innerHTML = "<span class='success-msg'>✔️ Territory locked! Redirecting to drone inspection suite...</span>";
-      setTimeout(() => {
-        window.location.href = "https://northsky-drones.vercel.app?bundle=inspection-kit";
-      }, 1200);
-    }
-  }
-  
-  // Auth state listener
-  async function initAuth() {
-    if (!supabase) {
-      authMessageDiv.innerHTML = "<div class='small-text' style='color:#facc15;'>⚠️ Supabase not configured — using demo login. Click 'Demo Access' below.</div>";
-      const demoBtn = document.createElement("button");
-      demoBtn.innerText = "🔓 Demo Access (mock login)";
-      demoBtn.className = "btn-outline";
-      demoBtn.style.marginTop = "12px";
-      demoBtn.onclick = () => {
-        currentSession = { email: "demo@contractor.com", id: "demo-user" };
-        isPaid = true;
-        currentPlan = "pro";
-        refreshUIAfterAuth();
-      };
-      document.querySelector(".auth-panel")?.appendChild(demoBtn);
-      return;
-    }
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      currentSession = user;
-      await fetchUserSubscription();
-      refreshUIAfterAuth();
-    } else {
-      refreshUIAfterAuth();
-    }
-    
-    supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) {
-        currentSession = session.user;
-        await fetchUserSubscription();
-        refreshUIAfterAuth();
-      } else if (event === "SIGNED_OUT") {
-        currentSession = null;
-        isPaid = false;
-        currentPlan = null;
-        refreshUIAfterAuth();
-      }
-    });
-  }
-  
-  function handleRedirectFromEmail() {
-    if (!supabase) return;
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = hashParams.get("access_token");
-    if (accessToken) {
-      supabase.auth.setSession({ access_token: accessToken, refresh_token: hashParams.get("refresh_token") || "" })
-        .then(({ error }) => {
-          if (error) console.warn(error);
-          else window.location.hash = "";
-        });
-    }
-  }
-  
-  // Event listeners
-  document.getElementById("sendMagicLinkBtn")?.addEventListener("click", sendMagicLink);
-  document.getElementById("manualRefreshPlanBtn")?.addEventListener("click", manualRefreshSubscription);
-  document.getElementById("submitLeadBtn")?.addEventListener("click", submitLead);
-  
-  // Attach buy now handlers dynamically (after DOM ready)
-  function attachBuyHandlers() {
-    document.querySelectorAll(".buy-now-btn").forEach(btn => {
-      btn.removeEventListener("click", buyHandler);
-      btn.addEventListener("click", buyHandler);
-    });
-  }
-  function buyHandler(e) {
-    const plan = e.currentTarget.dataset.plan;
-    showMockPurchase(plan);
-  }
-  
-  window.addEventListener("DOMContentLoaded", () => {
-    initAuth();
-    handleRedirectFromEmail();
-    attachBuyHandlers();
-    
-    if (!isSupabaseConfigured) {
-      const infoDiv = document.createElement("div");
-      infoDiv.className = "small-text";
-      infoDiv.style.background = "#1e1b4b";
-      infoDiv.style.padding = "8px";
-      infoDiv.style.borderRadius = "12px";
-      infoDiv.style.margin = "10px auto";
-      infoDiv.style.textAlign = "center";
-      infoDiv.innerHTML = "⚙️ <strong>Setup required:</strong> Replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY in the code.<br>Until then, use <strong>Demo Access</strong> button below.";
-      document.getElementById("authSection")?.appendChild(infoDiv);
-    }
-  });
-</script>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="card" style="text-align:center;">
+  <h2>Ready to Start Getting Booked Roofing Jobs?</h2>
+  <p>Stop losing leads to slow follow-up. Start filling your calendar instead.</p>
+  <button class="btn">Get Started Now</button>
+</div>
+
+<div class="footer">
+  RoofFlow © 2026 — Roofing Appointment System
+</div>
+
+</div>
+
 </body>
 </html>
