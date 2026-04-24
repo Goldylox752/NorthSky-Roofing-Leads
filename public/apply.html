@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+const { createClient } = require("@supabase/supabase-js");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -6,8 +6,23 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const { name, phone, email, city, monthly_jobs, lead_spend } = req.body;
+    const {
+      name,
+      phone,
+      email,
+      city,
+      monthly_jobs,
+      lead_spend
+    } = req.body || {};
+
+    if (!name || !phone || !email) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
 
     // =========================
     // QUALIFICATION LOGIC
@@ -20,18 +35,27 @@ export default async function handler(req, res) {
     // =========================
     // SAVE APPLICATION
     // =========================
-    await supabase.from("applications").insert({
-      name,
-      phone,
-      email,
-      city,
-      monthly_jobs,
-      lead_spend,
-      qualified,
-      created_at: new Date().toISOString()
-    });
+    const { error } = await supabase
+      .from("applications")
+      .insert([
+        {
+          name,
+          phone,
+          email,
+          city,
+          monthly_jobs,
+          lead_spend,
+          qualified,
+          created_at: new Date().toISOString()
+        }
+      ]);
 
-    return res.json({ qualified });
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "DB insert failed" });
+    }
+
+    return res.status(200).json({ qualified });
 
   } catch (err) {
     console.error(err);
