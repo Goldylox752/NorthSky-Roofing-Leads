@@ -1,11 +1,7 @@
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const dynamic = "force-dynamic";
-
-export async function GET() {
-  const supabase = getSupabaseAdmin();
-
-  const { data, error } = await supabase.auth.getUser();
+export async function GET(req) {
+  const { data, error } = await supabaseAdmin.auth.getUser();
 
   if (error) {
     return Response.json({ error: error.message }, { status: 401 });
