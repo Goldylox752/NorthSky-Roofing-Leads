@@ -21,6 +21,7 @@ export async function POST(req) {
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
+    console.error("Webhook signature error:", err.message);
     return new Response("Webhook Error", { status: 400 });
   }
 
@@ -28,17 +29,27 @@ export async function POST(req) {
     const session = event.data.object;
 
     const email = session.metadata?.email;
-    const plan = session.metadata?.plan;
     const phone = session.metadata?.phone;
+    const plan = session.metadata?.plan;
 
-    // 🔥 SAVE REAL SAAS DATA
-    if (email) {
-      await supabase.from("leads").upsert({
-        email,
-        phone,
-        plan,
-        status: "active",
-      });
+    // 🚨 ONLY ACCEPT VALID PLANS
+    const validPlans = ["starter", "elite"];
+
+    if (!email || !validPlans.includes(plan)) {
+      return new Response("Invalid data", { status: 400 });
+    }
+
+    // 🔥 UPSERT USER / LEAD
+    const { error } = await supabase.from("leads").upsert({
+      email,
+      phone,
+      plan,
+      status: "active",
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      console.error("Supabase error:", error.message);
     }
   }
 
