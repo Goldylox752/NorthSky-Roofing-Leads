@@ -7,7 +7,7 @@ export async function POST(req) {
   try {
     const { email, phone, answers = {} } = await req.json();
 
-    // 🧠 LEAD SCORING (must be inside handler)
+    // 🧠 LEAD SCORING (inside handler only)
     const leadScore = scoreLead({ email, phone, answers });
 
     // 🚨 BLOCK LOW QUALITY LEADS BEFORE STRIPE
@@ -21,7 +21,7 @@ export async function POST(req) {
       );
     }
 
-    // 💳 CREATE STRIPE SESSION
+    // 💳 CREATE STRIPE CHECKOUT SESSION
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
@@ -38,7 +38,7 @@ export async function POST(req) {
 
       customer_email: email,
 
-      // 📦 passed to webhook (SMS + CRM + analytics)
+      // 📦 Used later in webhook (SMS + CRM + analytics)
       metadata: {
         email,
         phone,
