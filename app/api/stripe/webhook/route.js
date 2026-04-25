@@ -1,5 +1,6 @@
-import Stripe from "stripe";
+]import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { sendSMS } from "@/lib/sendSMS";
 
 export const runtime = "nodejs";
 
@@ -32,11 +33,14 @@ export async function POST(req) {
     return new Response("Webhook Error", { status: 400 });
   }
 
+  // 🎯 STRIPE SUCCESS EVENT
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
 
     const email = session.customer_details?.email;
+    const phone = session.metadata?.phone;
 
+    // ✅ Update Supabase lead status
     if (email) {
       const { error } = await supabase
         .from("leads")
@@ -45,6 +49,18 @@ export async function POST(req) {
 
       if (error) {
         console.error("Supabase update error:", error.message);
+      }
+    }
+
+    // 📲 Send SMS confirmation + booking link
+    if (phone) {
+      try {
+        await sendSMS(
+          phone,
+          "RoofFlow Approved 🎉 Book your onboarding here: https://calendly.com/yourname/roof-onboarding"
+        );
+      } catch (smsError) {
+        console.error("SMS send failed:", smsError.message);
       }
     }
   }
