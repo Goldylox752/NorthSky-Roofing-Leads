@@ -1,6 +1,8 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+export const runtime = "nodejs";
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const supabase = createClient(
@@ -10,6 +12,11 @@ const supabase = createClient(
 
 export async function POST(req) {
   const sig = req.headers.get("stripe-signature");
+
+  if (!sig) {
+    return new Response("Missing signature", { status: 400 });
+  }
+
   const body = await req.text();
 
   let event;
@@ -21,22 +28,26 @@ export async function POST(req) {
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
+    console.error("Webhook signature verification failed:", err.message);
     return new Response("Webhook Error", { status: 400 });
   }
 
-  // 🎯 SUCCESS EVENT
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
 
     const email = session.customer_details?.email;
 
     if (email) {
-      await supabase
+      const { error } = await supabase
         .from("leads")
         .update({ status: "active" })
         .eq("email", email);
+
+      if (error) {
+        console.error("Supabase update error:", error.message);
+      }
     }
   }
 
-  return new Response("OK");
+  return new Response("OK", { status: 200 });
 }
