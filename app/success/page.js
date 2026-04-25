@@ -1,43 +1,29 @@
 import Link from "next/link";
 
-export default function Home() {
+export default function SuccessPage() {
   return (
     <main style={styles.container}>
-      {/* HERO */}
-      <section style={styles.hero}>
-        <h1 style={styles.title}>RoofFlow</h1>
-        <p style={styles.subtitle}>
-          We book roofing jobs for you — you just show up and close.
+      <div style={styles.card}>
+        <h1 style={styles.title}>Payment Successful 🎉</h1>
+
+        <p style={styles.text}>
+          Your subscription has been activated. Welcome to RoofFlow.
         </p>
 
-        <div style={styles.buttons}>
-          <Link href="/apply" style={styles.primaryBtn}>
-            Apply Now
+        <p style={styles.subtext}>
+          You can now start receiving qualified roofing leads automatically.
+        </p>
+
+        <div style={styles.actions}>
+          <Link href="/dashboard" style={styles.primaryBtn}>
+            Go to Dashboard
           </Link>
 
-          <Link href="/dashboard" style={styles.secondaryBtn}>
-            View Dashboard
+          <Link href="/" style={styles.secondaryBtn}>
+            Back to Home
           </Link>
         </div>
-      </section>
-
-      {/* FEATURES */}
-      <section style={styles.grid}>
-        <div style={styles.card}>
-          <h3>Qualified Leads</h3>
-          <p>We filter out low-quality traffic and send you real homeowners.</p>
-        </div>
-
-        <div style={styles.card}>
-          <h3>Pay Per Result</h3>
-          <p>Only pay when leads are delivered or subscriptions activate.</p>
-        </div>
-
-        <div style={styles.card}>
-          <h3>Automated System</h3>
-          <p>Stripe + Supabase + AI lead engine fully automated.</p>
-        </div>
-      </section>
+      </div>
     </main>
   );
 }
@@ -45,37 +31,50 @@ export default function Home() {
 const styles = {
   container: {
     fontFamily: "Arial, sans-serif",
-    padding: "40px",
+    minHeight: "100vh",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
     background: "#0b1220",
     color: "#fff",
-    minHeight: "100vh",
+    padding: "20px",
   },
 
-  hero: {
+  card: {
+    background: "#111827",
+    padding: "40px",
+    borderRadius: "16px",
+    border: "1px solid #1f2937",
     textAlign: "center",
-    marginBottom: "60px",
+    maxWidth: "500px",
   },
 
   title: {
-    fontSize: "48px",
-    fontWeight: "bold",
+    fontSize: "32px",
     marginBottom: "10px",
   },
 
-  subtitle: {
-    fontSize: "18px",
-    color: "#b0b0b0",
+  text: {
+    fontSize: "16px",
+    color: "#d1d5db",
+    marginBottom: "10px",
+  },
+
+  subtext: {
+    fontSize: "14px",
+    color: "#9ca3af",
     marginBottom: "30px",
   },
 
-  buttons: {
+  actions: {
     display: "flex",
     gap: "12px",
     justifyContent: "center",
+    flexWrap: "wrap",
   },
 
   primaryBtn: {
-    padding: "12px 20px",
+    padding: "12px 18px",
     background: "#2563eb",
     color: "#fff",
     borderRadius: "10px",
@@ -83,23 +82,10 @@ const styles = {
   },
 
   secondaryBtn: {
-    padding: "12px 20px",
+    padding: "12px 18px",
     background: "#1f2937",
     color: "#fff",
     borderRadius: "10px",
     textDecoration: "none",
-  },
-
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "20px",
-  },
-
-  card: {
-    background: "#111827",
-    padding: "20px",
-    borderRadius: "12px",
-    border: "1px solid #1f2937",
   },
 };
