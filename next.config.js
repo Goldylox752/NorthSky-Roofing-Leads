@@ -1,5 +1,8 @@
-const nextConfig = {
-  reactStrictMode: true,
-};
-
-module.exports = nextConfig;
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  }
+}
