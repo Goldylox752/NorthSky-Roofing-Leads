@@ -4,29 +4,29 @@ export const runtime = "nodejs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// 🔥 MUST BE STRIPE RECURRING PRICE IDs (NOT amounts)
+// 🧠 ONLY 2 PLANS NOW
 const PRICES = {
   starter: process.env.STRIPE_STARTER_PRICE_ID,
-  growth: process.env.STRIPE_GROWTH_PRICE_ID,
-  domination: process.env.STRIPE_DOMINATION_PRICE_ID,
+  elite: process.env.STRIPE_ELITE_PRICE_ID,
 };
 
 export async function POST(req) {
   try {
     const { plan, email, phone } = await req.json();
 
+    // 🚨 validate plan
     if (!PRICES[plan]) {
       return Response.json({ error: "Invalid plan" }, { status: 400 });
     }
 
     const session = await stripe.checkout.sessions.create({
-      mode: "subscription", // 🔥 CRITICAL FIX
+      mode: "subscription",
 
       payment_method_types: ["card"],
 
       line_items: [
         {
-          price: PRICES[plan], // 🔥 recurring price ID
+          price: PRICES[plan],
           quantity: 1,
         },
       ],
