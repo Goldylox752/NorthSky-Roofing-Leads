@@ -7,43 +7,73 @@ const supabase = createClient(
 );
 
 export async function GET() {
-  const now = new Date();
+  try {
+    const now = new Date();
 
-  const { data: leads } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("status", "active");
+    const { data: leads, error } = await supabase
+      .from("leads")
+      .select("*")
+      .eq("status", "active");
 
-  for (const lead of leads) {
-    const created = new Date(lead.created_at);
-    const days = Math.floor((now - created) / (1000 * 60 * 60 * 24));
-
-    // DAY 1
-    if (days === 1 && lead.stage !== "day1") {
-      await sendSMS(
-        lead.phone,
-        "RoofFlow reminder: spots are filling fast this week. Book your onboarding."
-      );
-
-      await supabase
-        .from("leads")
-        .update({ stage: "day1" })
-        .eq("id", lead.id);
+    if (error || !leads) {
+      return Response.json({ ok: false, error: "No leads found" });
     }
 
-    // DAY 3 (URGENCY)
-    if (days === 3 && lead.stage !== "day3") {
-      await sendSMS(
-        lead.phone,
-        "Final reminder: we may close your territory soon. Book now: https://calendly.com/yourlink"
+    const updates = [];
+
+    for (const lead of leads) {
+      const created = new Date(lead.created_at);
+      const days = Math.floor(
+        (now - created) / (1000 * 60 * 60 * 24)
       );
 
-      await supabase
-        .from("leads")
-        .update({ stage: "day3" })
-        .eq("id", lead.id);
+      // =========================
+      // DAY 1 FOLLOW-UP
+      // =========================
+      if (days === 1 && lead.stage !== "day1") {
+        await sendSMS(
+          lead.phone,
+          "RoofFlow reminder: spots are filling fast this week. Book your onboarding."
+        );
+
+        updates.push(
+          supabase
+            .from("leads")
+            .update({ stage: "day1" })
+            .eq("id", lead.id)
+        );
+      }
+
+      // =========================
+      // DAY 3 URGENCY
+      // =========================
+      if (days === 3 && lead.stage !== "day3") {
+        await sendSMS(
+          lead.phone,
+          "Final reminder: we may close your territory soon. Book now: https://calendly.com/yourlink"
+        );
+
+        updates.push(
+          supabase
+            .from("leads")
+            .update({ stage: "day3" })
+            .eq("id", lead.id)
+        );
+      }
     }
+
+    // execute updates safely
+    await Promise.all(updates);
+
+    return Response.json({
+      ok: true,
+      processed: leads.length,
+    });
+
+  } catch (err) {
+    return Response.json(
+      { ok: false, error: err.message },
+      { status: 500 }
+    );
   }
-
-  return Response.json({ ok: true });
 }
