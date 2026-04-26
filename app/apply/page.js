@@ -14,7 +14,24 @@ export default function Apply() {
 
   const [lastSubmit, setLastSubmit] = useState(0);
 
+  // 🕳️ honeypot field (bot trap)
+  const [website, setWebsite] = useState("");
+
   const isValidEmail = (v) => /\S+@\S+\.\S+/.test(v);
+
+  const disposableDomains = [
+    "mailinator.com",
+    "tempmail.com",
+    "10minutemail.com",
+    "guerrillamail.com",
+    "yopmail.com",
+    "trashmail.com",
+  ];
+
+  const isDisposableEmail = (email) => {
+    const domain = email.split("@")[1];
+    return disposableDomains.includes(domain);
+  };
 
   const normalizePhone = (v) => v.replace(/\D/g, "");
 
@@ -41,18 +58,30 @@ export default function Apply() {
 
   const region = useMemo(() => detectRegion(cleanedPhone), [cleanedPhone]);
 
+  // 🧠 improved lead scoring (AI-ready structure)
   const leadScore = useMemo(() => {
-    return (isValidEmail(email) ? 50 : 0) +
-           (isValidPhone ? 50 : 0);
+    let score = 0;
+
+    if (isValidEmail(email)) score += 40;
+    if (isValidPhone) score += 40;
+    if (!email.includes("gmail")) score += 10;
+    if (email.startsWith("info@") || email.startsWith("admin@")) score += 10;
+
+    return Math.min(score, 100);
   }, [email, isValidPhone]);
 
-  const isQualified = isValidEmail(email) && isValidPhone;
+  const isQualified = leadScore >= 80;
 
   const handleNext = () => {
     setError("");
 
     if (!isValidEmail(email)) {
       setError("Please enter a valid business email.");
+      return;
+    }
+
+    if (isDisposableEmail(email)) {
+      setError("Disposable emails are not allowed.");
       return;
     }
 
@@ -63,7 +92,13 @@ export default function Apply() {
     e.preventDefault();
     setError("");
 
-    // 🛡️ spam protection (10s cooldown)
+    // 🕳️ bot detection
+    if (website) {
+      setError("Bot detected.");
+      return;
+    }
+
+    // 🛡️ IP / spam cooldown
     const now = Date.now();
     if (now - lastSubmit < 10000) {
       setError("Please wait before submitting again.");
@@ -76,7 +111,7 @@ export default function Apply() {
       return;
     }
 
-    if (leadScore < 80) {
+    if (!isQualified) {
       setError("We only accept qualified roofing contractors.");
       return;
     }
@@ -84,28 +119,28 @@ export default function Apply() {
     setLoading(true);
 
     try {
+      const payload = {
+        email,
+        phone: cleanedPhone,
+        plan,
+        lead_score: leadScore,
+        region,
+        source: "apply_form",
+        hot_lead: leadScore >= 90,
+      };
+
+      // 1️⃣ SAVE LEAD
       await fetch("/api/leads/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          phone: cleanedPhone,
-          plan,
-          lead_score: leadScore,
-          region,
-          source: "apply_form",
-        }),
+        body: JSON.stringify(payload),
       });
 
+      // 2️⃣ CHECKOUT
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          phone: cleanedPhone,
-          plan,
-          lead_score: leadScore,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -123,26 +158,36 @@ export default function Apply() {
   return (
     <div style={styles.page}>
       <div style={styles.card}>
+
+        {/* 🕳️ honeypot field (hidden) */}
+        <input
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          style={{ display: "none" }}
+          tabIndex="-1"
+          autoComplete="off"
+        />
+
         <h1 style={styles.h1}>Apply to RoofFlow</h1>
 
         <p style={styles.subtext}>
           Automated roofing appointments delivered directly to your pipeline
         </p>
 
-        {/* 🧠 LIVE STATUS */}
+        {/* 🚨 HOT LEAD BADGE */}
         <p style={{
           fontSize: 13,
           fontWeight: "bold",
           marginTop: 8,
           color: isQualified ? "#22c55e" : "#f87171"
         }}>
-          {isQualified ? "✅ Qualified Lead" : "⚠️ Not Qualified Yet"}
+          {isQualified ? "🔥 Hot Qualified Lead" : "⚠️ Not Qualified Yet"}
         </p>
 
         <p style={styles.step}>Step {step} of 2</p>
 
         <p style={styles.badges}>
-          🌎 {region} · 🔒 Secure · ⚡ Instant filtering
+          🌎 {region} · 🛡️ Anti-spam enabled · ⚡ AI scoring active
         </p>
 
         <div style={styles.planBox}>
