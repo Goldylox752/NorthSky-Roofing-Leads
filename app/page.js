@@ -1,82 +1,111 @@
 export default function Home() {
   return (
     <main style={styles.page}>
+
       {/* HERO */}
       <section style={styles.hero}>
         <h1 style={styles.h1}>
-          We Book High-Intent Roofing Jobs for You
+          We Deliver High-Intent Roofing Customers to Your Business
         </h1>
 
         <p style={styles.subtext}>
-          RoofFlow generates, filters, and delivers qualified homeowners
-          directly into your pipeline — so you close jobs, not chase leads.
+          RoofFlow connects roofing contractors with homeowners actively requesting estimates — 
+          then filters, qualifies, and delivers them directly into your pipeline.
         </p>
 
         <div style={styles.ctaRow}>
-          <a href="/apply" style={styles.primaryBtn}>Apply Now</a>
-          <a href="#pricing" style={styles.secondaryBtn}>See Pricing</a>
+          <a href="/apply" style={styles.primaryBtn}>Get Qualified Leads</a>
+          <a href="#pricing" style={styles.secondaryBtn}>View Plans</a>
         </div>
 
         <p style={styles.micro}>
-          No junk leads. No shared lists. No wasted ad spend.
+          No shared leads. No cold traffic. No wasted ad spend.
         </p>
       </section>
 
-      {/* TRUST */}
+      {/* TRUST STRIP */}
       <section style={styles.trust}>
-        <p>Trusted by roofing contractors across North America</p>
+        <p>
+          Built for roofing contractors across North America — focused on high-intent homeowner demand, not random traffic.
+        </p>
       </section>
 
-      {/* FEATURES */}
+      {/* VALUE PROP */}
       <section style={styles.section}>
-        <h2 style={styles.h2}>Why Contractors Use RoofFlow</h2>
+        <h2 style={styles.h2}>Why Contractors Choose RoofFlow</h2>
 
         <div style={styles.grid}>
           <div style={styles.card}>
-            <h3>Pre-Qualified Homeowners</h3>
+            <h3>Qualified Homeowner Requests</h3>
             <p>
-              Every lead is filtered by intent, budget, and urgency before
-              it ever hits your dashboard.
+              Every lead is filtered for intent, location, and urgency before it reaches your pipeline.
             </p>
           </div>
 
           <div style={styles.card}>
-            <h3>Booked Appointments</h3>
+            <h3>Booked Estimates, Not Clicks</h3>
             <p>
-              We don’t sell raw leads — we deliver scheduled inspections
-              and ready-to-buy homeowners.
+              We focus on delivering real appointment opportunities — not raw traffic or low-quality form fills.
             </p>
           </div>
 
           <div style={styles.card}>
-            <h3>Exclusive Territory</h3>
+            <h3>Territory Protection</h3>
             <p>
-              One contractor per area. No competition, no bidding wars.
+              Each service area is limited to a small number of contractors to reduce competition and increase close rates.
             </p>
           </div>
         </div>
       </section>
 
-      {/* RESULTS */}
+      {/* COMPETITOR POSITIONING */}
       <section style={styles.sectionDark}>
-        <h2 style={styles.h2}>Real Contractor Results</h2>
+        <h2 style={styles.h2}>Why RoofFlow Outperforms Ads & Lead Lists</h2>
+
+        <div style={styles.grid}>
+          <div style={styles.card}>
+            <h3>Google Ads</h3>
+            <p>
+              Expensive clicks, unpredictable leads, and high competition.
+            </p>
+          </div>
+
+          <div style={styles.card}>
+            <h3>Facebook Leads</h3>
+            <p>
+              Low intent homeowners with inconsistent buying urgency.
+            </p>
+          </div>
+
+          <div style={styles.cardHighlight}>
+            <h3>RoofFlow</h3>
+            <p>
+              Homeowners actively requesting roofing estimates, pre-qualified before delivery.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* SOCIAL PROOF */}
+      <section style={styles.section}>
+        <h2 style={styles.h2}>Contractor Feedback</h2>
 
         <div style={styles.grid}>
           <div style={styles.testimonial}>
-            “Closed 7 jobs in the first month. Easily the highest quality leads I’ve had.”
-            <span> — Roofing Contractor, Texas</span>
+            “The leads are serious. We stopped wasting time on unqualified calls immediately.”
+            <span> — Roofing Contractor, Alberta</span>
           </div>
 
           <div style={styles.testimonial}>
-            “Every call is serious now. No more tire-kickers wasting time.”
-            <span> — Roofing Company Owner</span>
+            “First month we booked more inspections than we used to get in a full quarter.”
+            <span> — Roofing Business Owner</span>
           </div>
         </div>
       </section>
 
       {/* PRICING */}
       <section id="pricing" style={styles.section}>
-        <h2 style={styles.h2}>Simple Monthly Pricing</h2>
+        <h2 style={styles.h2}>Simple Monthly Plans</h2>
 
         <div style={styles.grid}>
           <div style={styles.card}>
@@ -88,53 +117,59 @@ export default function Home() {
           <div style={styles.cardHighlight}>
             <h3>Growth</h3>
             <p>$999 / month</p>
-            <p>15–30 booked appointments</p>
-            <p>Priority routing</p>
+            <p>15–30 booked estimates</p>
+            <p>Priority lead routing</p>
           </div>
 
           <div style={styles.card}>
             <h3>Domination</h3>
             <p>$1,999 / month</p>
-            <p>High-volume + exclusive territory</p>
+            <p>High-volume + exclusive territory access</p>
           </div>
         </div>
 
         <div style={{ marginTop: 20, textAlign: "center" }}>
           <a href="/apply" style={styles.primaryBtn}>
-            Start Getting Leads
+            Start Receiving Leads
           </a>
         </div>
       </section>
 
       {/* FAQ */}
       <section style={styles.sectionDark}>
-        <h2 style={styles.h2}>FAQ</h2>
+        <h2 style={styles.h2}>Frequently Asked Questions</h2>
 
         <div style={styles.faq}>
           <p>
             <b>Are leads exclusive?</b><br />
-            Yes — one contractor per territory.
+            Yes — each territory is limited to a small number of contractors.
           </p>
 
           <p>
-            <b>Do you guarantee jobs?</b><br />
-            We guarantee qualified appointments, not closed sales.
+            <b>Do you guarantee sales?</b><br />
+            We guarantee qualified homeowner appointments, not final sales.
           </p>
 
           <p>
-            <b>How fast do I get leads?</b><br />
-            Usually within 24–72 hours after approval.
+            <b>How fast do leads come in?</b><br />
+            Typically within 24–72 hours after activation.
           </p>
         </div>
       </section>
 
       {/* FINAL CTA */}
       <section style={styles.hero}>
-        <h2 style={styles.h2}>Ready to fill your schedule?</h2>
+        <h2 style={styles.h2}>Ready to fill your schedule with real jobs?</h2>
+
         <a href="/apply" style={styles.primaryBtn}>
-          Apply & Get Leads
+          Apply Now
         </a>
+
+        <p style={styles.micro}>
+          Start receiving qualified roofing appointments in your area.
+        </p>
       </section>
+
     </main>
   );
 }
