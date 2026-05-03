@@ -4,9 +4,14 @@ import { useEffect } from "react";
 import Link from "next/link";
 
 export default function Home() {
+
+  const API_BASE =
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://your-render-backend.onrender.com";
+
   const trackCTA = async (eventName) => {
     try {
-      await fetch("/api/event", {
+      await fetch(`${API_BASE}/api/event`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -16,19 +21,21 @@ export default function Home() {
         }),
       });
     } catch (err) {
-      console.error("Tracking failed:", err);
+      console.log("Tracking failed (non-blocking)");
     }
   };
 
   useEffect(() => {
-    if (typeof window !== "undefined") window.__tracked = false;
+    let tracked = false;
 
     const onScroll = () => {
-      const height = document.documentElement.scrollHeight - window.innerHeight;
+      const height =
+        document.documentElement.scrollHeight - window.innerHeight;
+
       const progress = window.scrollY / height;
 
-      if (progress > 0.5 && !window.__tracked) {
-        window.__tracked = true;
+      if (progress > 0.5 && !tracked) {
+        tracked = true;
         trackCTA("scroll_50");
       }
     };
@@ -54,16 +61,16 @@ export default function Home() {
       {/* HERO */}
       <section style={styles.hero}>
         <div style={styles.badge}>
-          🚀 AI Roofing Lead System
+          🚀 Exclusive Roofing Lead System
         </div>
 
         <h1 style={styles.h1}>
-          Get Exclusive Roofing Jobs<br />Without Paying for Leads
+          Get High-Value Roofing Jobs<br />Without Paying for Shared Leads
         </h1>
 
         <p style={styles.sub}>
-          RoofFlow delivers <b>pre-qualified homeowners actively requesting roofing estimates</b>
-          directly to your pipeline — no ads, no shared leads, no wasted time.
+          We deliver <b>pre-qualified homeowners actively requesting roofing estimates</b>
+          directly to contractors — no ads, no competition, no wasted time.
         </p>
 
         <div style={styles.ctaRow}>
@@ -89,14 +96,13 @@ export default function Home() {
         </p>
       </section>
 
-      {/* VALUE SECTION */}
+      {/* VALUE */}
       <section style={styles.card}>
-        <h2>Why Contractors Use RoofFlow</h2>
-
+        <h2>Why Contractors Switch</h2>
         <ul>
-          <li>✔ Exclusive roofing leads (no sharing with competitors)</li>
-          <li>✔ Homeowners already requesting quotes</li>
-          <li>✔ AI filters out low-quality inquiries</li>
+          <li>✔ Exclusive, non-shared roofing leads</li>
+          <li>✔ Homeowners actively requesting quotes</li>
+          <li>✔ AI filters low-quality inquiries</li>
           <li>✔ Automated follow-up increases booked jobs</li>
         </ul>
       </section>
@@ -104,34 +110,30 @@ export default function Home() {
       {/* HOW IT WORKS */}
       <section style={styles.card}>
         <h2>How It Works</h2>
-
         <ul>
           <li>1. Homeowners request roofing estimates</li>
-          <li>2. AI qualifies urgency + budget</li>
-          <li>3. You receive only high-intent leads</li>
-          <li>4. Leads are followed up automatically</li>
+          <li>2. AI qualifies urgency & intent</li>
+          <li>3. You receive only high-value leads</li>
+          <li>4. Automated follow-up closes more jobs</li>
         </ul>
       </section>
 
-      {/* DIFFERENTIATOR */}
+      {/* PROBLEM */}
       <section style={styles.highlight}>
-        <h2>The Problem We Solve</h2>
-
+        <h2>The Problem</h2>
         <p>
-          Most contractors waste thousands on shared leads and ads that don’t convert.
+          Contractors waste thousands on shared leads and low-quality traffic.
         </p>
-
         <p>
           RoofFlow replaces that with <b>exclusive, intent-based job requests</b>.
         </p>
       </section>
 
-      {/* SOCIAL PROOF (PLACEHOLDER BUT IMPORTANT) */}
+      {/* SOCIAL PROOF */}
       <section style={styles.card}>
-        <h2>Built for High-Volume Contractors</h2>
-
+        <h2>Built for Growing Roofing Companies</h2>
         <p>
-          Designed for roofing companies doing $500K+ annually who want predictable job flow.
+          Designed for contractors doing $500K+ annually who want predictable job flow.
         </p>
       </section>
 
@@ -139,7 +141,7 @@ export default function Home() {
       <section style={styles.final}>
         <h2>Ready to Claim Your Territory?</h2>
 
-        <p>Applications are reviewed based on location availability.</p>
+        <p>Applications are reviewed based on availability in your area.</p>
 
         <Link
           href="/apply"
@@ -155,7 +157,7 @@ export default function Home() {
 }
 
 /* ===================== */
-/* STYLES */
+/* STYLES (unchanged but clean) */
 /* ===================== */
 
 const styles = {
