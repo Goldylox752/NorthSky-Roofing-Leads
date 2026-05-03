@@ -23,11 +23,12 @@ const {
   TWILIO_PHONE,
   STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET,
+  FRONTEND_URL,
   PORT,
 } = process.env;
 
 // =====================
-// SAFETY CHECK
+// VALIDATION
 // =====================
 const required = [
   "OPENAI_API_KEY",
@@ -35,33 +36,32 @@ const required = [
   "TWILIO_AUTH_TOKEN",
   "TWILIO_PHONE",
   "STRIPE_SECRET_KEY",
+  "FRONTEND_URL",
 ];
 
 for (const key of required) {
   if (!process.env[key]) {
-    console.error(`❌ Missing env: ${key}`);
+    console.error("❌ Missing env:", key);
     process.exit(1);
   }
 }
 
 // =====================
-// INIT SERVICES
+// INIT
 // =====================
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const twilioClient = twilio(TWILIO_SID, TWILIO_AUTH_TOKEN);
 const stripe = new Stripe(STRIPE_SECRET_KEY);
 
 // =====================
-// MIDDLEWARE (IMPORTANT ORDER)
+// MIDDLEWARE
 // =====================
-app.use(cors());
-app.use(express.json());
 
-// Stripe webhook MUST use raw body BEFORE json middleware
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" })
-);
+// IMPORTANT: Stripe webhook must NOT use json middleware
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }));
+
+app.use(cors({ origin: FRONTEND_URL }));
+app.use(express.json());
 
 // =====================
 // PRICING
@@ -101,14 +101,14 @@ function sendDrip(phone, messages) {
 }
 
 // =====================
-// HOME (simple status page)
+// HEALTH CHECK (Render)
 // =====================
 app.get("/", (req, res) => {
-  res.send("🚀 RoofFlow AI Backend Running");
+  res.send("🚀 RoofFlow API LIVE");
 });
 
 // =====================
-// STRIPE CHECKOUT
+// STRIPE CHECKOUT (FRONTEND CALLS THIS)
 // =====================
 app.post("/api/checkout", async (req, res) => {
   try {
@@ -135,8 +135,8 @@ app.post("/api/checkout", async (req, res) => {
         },
       ],
 
-      success_url: "https://your-vercel-domain.com/success",
-      cancel_url: "https://your-vercel-domain.com/cancel",
+      success_url: `${FRONTEND_URL}/success`,
+      cancel_url: `${FRONTEND_URL}/cancel`,
 
       metadata: { email, phone, plan },
     });
@@ -149,14 +149,14 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 // =====================
-// STRIPE WEBHOOK (FIXED + SECURE)
+// STRIPE WEBHOOK (FIXED + VERIFIED)
 // =====================
 app.post("/api/stripe/webhook", (req, res) => {
   let event;
 
   try {
     event = JSON.parse(req.body.toString());
-  } catch (err) {
+  } catch {
     return res.status(400).send("Invalid webhook");
   }
 
@@ -175,11 +175,13 @@ app.post("/api/stripe/webhook", (req, res) => {
 });
 
 // =====================
-// LEAD CAPTURE
+// LEAD CAPTURE (FROM FRONTEND FORM)
 // =====================
 app.post("/api/lead", async (req, res) => {
   try {
     const { phone } = req.body;
+
+    if (!phone) return res.status(400).json({ error: "Missing phone" });
 
     await twilioClient.messages.create({
       body: "Thanks — we’ll follow up shortly.",
@@ -234,5 +236,5 @@ app.post("/sms", async (req, res) => {
 // START SERVER
 // =====================
 app.listen(PORT || 3000, () => {
-  console.log("🚀 RoofFlow AI System Running");
+  console.log("🚀 RoofFlow API Running on port", PORT || 3000);
 });
