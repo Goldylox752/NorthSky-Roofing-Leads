@@ -27,23 +27,21 @@ const {
 } = process.env;
 
 // =====================
-// VALIDATION
+// SAFETY CHECK
 // =====================
-const required = [
+[
   "OPENAI_API_KEY",
   "TWILIO_SID",
   "TWILIO_AUTH_TOKEN",
   "TWILIO_PHONE",
   "STRIPE_SECRET_KEY",
   "FRONTEND_URL",
-];
-
-for (const key of required) {
+].forEach((key) => {
   if (!process.env[key]) {
     console.error("❌ Missing env:", key);
     process.exit(1);
   }
-}
+});
 
 // =====================
 // INIT SERVICES
@@ -55,13 +53,7 @@ const stripe = new Stripe(STRIPE_SECRET_KEY);
 // =====================
 // MIDDLEWARE
 // =====================
-app.use(
-  cors({
-    origin: FRONTEND_URL,
-    methods: ["GET", "POST"],
-  })
-);
-
+app.use(cors({ origin: FRONTEND_URL }));
 app.use(express.json());
 
 // =====================
@@ -109,15 +101,15 @@ app.get("/", (req, res) => {
 });
 
 // =====================
-// EVENT TRACKING (FIXED)
+// EVENT TRACKING
 // =====================
 app.post("/api/event", (req, res) => {
-  console.log("📊 EVENT:", req.body);
+  console.log("EVENT:", req.body);
   res.json({ success: true });
 });
 
 // =====================
-// STRIPE CHECKOUT
+// CHECKOUT
 // =====================
 app.post("/api/checkout", async (req, res) => {
   try {
@@ -130,7 +122,6 @@ app.post("/api/checkout", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-
       line_items: [
         {
           price_data: {
@@ -143,64 +134,50 @@ app.post("/api/checkout", async (req, res) => {
           quantity: 1,
         },
       ],
-
       success_url: `${FRONTEND_URL}/success`,
       cancel_url: `${FRONTEND_URL}/cancel`,
-
-      metadata: {
-        email,
-        phone,
-        plan,
-      },
+      metadata: { email, phone, plan },
     });
 
     res.json({ url: session.url });
   } catch (err) {
-    console.error("Stripe error:", err);
+    console.error(err);
     res.status(500).json({ error: "Checkout failed" });
   }
 });
 
 // =====================
-// STRIPE WEBHOOK (ROBUST)
+// WEBHOOK (NO JSON MIDDLEWARE ISSUE)
 // =====================
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    let event;
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), (req, res) => {
+  let event;
 
-    try {
-      event = JSON.parse(req.body.toString());
-    } catch (err) {
-      return res.status(400).send("Invalid webhook");
-    }
-
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const phone = session.metadata?.phone;
-
-      console.log("💰 PAYMENT SUCCESS:", session.metadata);
-
-      if (phone) {
-        sendDrip(phone, dripSequence());
-      }
-    }
-
-    res.json({ received: true });
+  try {
+    event = JSON.parse(req.body.toString());
+  } catch {
+    return res.status(400).send("Invalid webhook");
   }
-);
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const phone = session.metadata?.phone;
+
+    console.log("💰 PAYMENT:", session.metadata);
+
+    if (phone) sendDrip(phone, dripSequence());
+  }
+
+  res.json({ received: true });
+});
 
 // =====================
-// LEAD CAPTURE
+// LEADS
 // =====================
 app.post("/api/lead", async (req, res) => {
   try {
     const { phone } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ error: "Missing phone" });
-    }
+    if (!phone) return res.status(400).json({ error: "Missing phone" });
 
     await twilioClient.messages.create({
       body: "Thanks — we’ll follow up shortly.",
@@ -212,13 +189,13 @@ app.post("/api/lead", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("Lead error:", err);
+    console.error(err);
     res.status(500).json({ error: "Lead error" });
   }
 });
 
 // =====================
-// SMS AI BOT
+// SMS BOT
 // =====================
 app.post("/sms", async (req, res) => {
   try {
@@ -230,10 +207,7 @@ app.post("/sms", async (req, res) => {
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        {
-          role: "system",
-          content: "Short helpful business assistant.",
-        },
+        { role: "system", content: "Short helpful assistant." },
         { role: "user", content: msg },
       ],
     });
@@ -249,14 +223,9 @@ app.post("/sms", async (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("SMS error:", err);
+    console.error(err);
     res.sendStatus(500);
   }
 });
 
-// =====================
-// START SERVER
-// =====================
-app.listen(PORT || 3000, () => {
-  console.log("🚀 RoofFlow API Running on port", PORT || 3000);
-});
+module.exports = app;
