@@ -22,6 +22,7 @@ const {
   TWILIO_AUTH_TOKEN,
   TWILIO_PHONE,
   STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET,
   PORT,
 } = process.env;
 
@@ -44,7 +45,7 @@ for (const key of required) {
 }
 
 // =====================
-// SERVICES
+// INIT SERVICES
 // =====================
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const twilioClient = twilio(TWILIO_SID, TWILIO_AUTH_TOKEN);
@@ -56,6 +57,12 @@ const stripe = new Stripe(STRIPE_SECRET_KEY);
 app.use(cors());
 app.use(express.json());
 
+// Stripe webhook MUST use raw body BEFORE json middleware
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" })
+);
+
 // =====================
 // PRICING
 // =====================
@@ -66,7 +73,7 @@ const PLANS = {
 };
 
 // =====================
-// DRIP SYSTEM (MVP VERSION)
+// DRIP SYSTEM
 // =====================
 function dripSequence() {
   return [
@@ -78,7 +85,7 @@ function dripSequence() {
 }
 
 function sendDrip(phone, messages) {
-  messages.forEach((msg, i) => {
+  messages.forEach((msg) => {
     setTimeout(async () => {
       try {
         await twilioClient.messages.create({
@@ -86,8 +93,6 @@ function sendDrip(phone, messages) {
           from: TWILIO_PHONE,
           to: phone,
         });
-
-        console.log(`📤 Drip ${i + 1} sent → ${phone}`);
       } catch (err) {
         console.error("Drip error:", err.message);
       }
@@ -96,104 +101,10 @@ function sendDrip(phone, messages) {
 }
 
 // =====================
-// 🔥 HIGH-CONVERTING LANDING PAGE
+// HOME (simple status page)
 // =====================
 app.get("/", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>RoofFlow AI Leads</title>
-
-<style>
-body {
-  margin:0;
-  font-family: Arial;
-  background:#0b1220;
-  color:white;
-}
-
-.container {
-  max-width:900px;
-  margin:auto;
-  padding:80px 20px;
-  text-align:center;
-}
-
-h1 { font-size:44px; }
-
-p {
-  color:#cbd5e1;
-  font-size:18px;
-}
-
-.card {
-  background:#111827;
-  padding:30px;
-  border-radius:12px;
-  margin-top:40px;
-  border:1px solid #1f2937;
-}
-
-.btn {
-  margin-top:20px;
-  padding:14px 22px;
-  background:#22c55e;
-  border:none;
-  border-radius:10px;
-  font-weight:bold;
-  cursor:pointer;
-}
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-  <h1>Exclusive Roofing Leads<br/>Delivered Instantly</h1>
-
-  <p>
-    AI finds homeowners actively requesting roofing estimates and sends them directly to you via SMS.
-  </p>
-
-  <div class="card">
-    <h2>What You Get</h2>
-    <p>
-      ✔ Exclusive leads<br/>
-      ✔ No shared contractors<br/>
-      ✔ AI qualification<br/>
-      ✔ SMS delivery system
-    </p>
-
-    <button class="btn" onclick="checkout('growth')">
-      Get Access
-    </button>
-  </div>
-
-</div>
-
-<script>
-async function checkout(plan) {
-  const res = await fetch('/api/checkout', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      plan,
-      email:'test@test.com',
-      phone:'0000000000'
-    })
-  });
-
-  const data = await res.json();
-  window.location.href = data.url;
-}
-</script>
-
-</body>
-</html>
-  `);
+  res.send("🚀 RoofFlow AI Backend Running");
 });
 
 // =====================
@@ -210,25 +121,27 @@ app.post("/api/checkout", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: "usd",
-          product_data: {
-            name: `RoofFlow AI - ${plan}`,
-          },
-          unit_amount: PLANS[plan],
-        },
-        quantity: 1,
-      }],
 
-      success_url: `${req.headers.origin}`,
-      cancel_url: `${req.headers.origin}`,
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `RoofFlow AI - ${plan}`,
+            },
+            unit_amount: PLANS[plan],
+          },
+          quantity: 1,
+        },
+      ],
+
+      success_url: "https://your-vercel-domain.com/success",
+      cancel_url: "https://your-vercel-domain.com/cancel",
 
       metadata: { email, phone, plan },
     });
 
     res.json({ url: session.url });
-
   } catch (err) {
     console.error("Stripe error:", err);
     res.status(500).json({ error: "Checkout failed" });
@@ -236,32 +149,30 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 // =====================
-// STRIPE WEBHOOK (SAFE VERSION)
+// STRIPE WEBHOOK (FIXED + SECURE)
 // =====================
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    let event;
+app.post("/api/stripe/webhook", (req, res) => {
+  let event;
 
-    try {
-      event = JSON.parse(req.body.toString());
-    } catch {
-      return res.status(400).send("Invalid webhook");
-    }
-
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const phone = session.metadata?.phone;
-
-      console.log("💰 PAYMENT SUCCESS:", session.metadata);
-
-      if (phone) sendDrip(phone, dripSequence());
-    }
-
-    res.json({ received: true });
+  try {
+    event = JSON.parse(req.body.toString());
+  } catch (err) {
+    return res.status(400).send("Invalid webhook");
   }
-);
+
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const phone = session.metadata?.phone;
+
+    console.log("💰 PAYMENT SUCCESS:", session.metadata);
+
+    if (phone) {
+      sendDrip(phone, dripSequence());
+    }
+  }
+
+  res.json({ received: true });
+});
 
 // =====================
 // LEAD CAPTURE
@@ -279,8 +190,8 @@ app.post("/api/lead", async (req, res) => {
     sendDrip(phone, dripSequence());
 
     res.json({ success: true });
-
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Lead error" });
   }
 });
@@ -313,7 +224,6 @@ app.post("/sms", async (req, res) => {
     });
 
     res.sendStatus(200);
-
   } catch (err) {
     console.error(err);
     res.sendStatus(500);
