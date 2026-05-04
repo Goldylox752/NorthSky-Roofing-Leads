@@ -1,13 +1,14 @@
 import Lead from "@/models/Lead";
 import dbConnect from "@/lib/db";
 import { routeLead } from "@/lib/routeLead";
+import { lockLead } from "@/lib/leadLock";
+import { calculateLeadPrice } from "@/lib/pricingEngine";
 
 export async function POST(req) {
   try {
     await dbConnect();
 
     const body = await req.json();
-
     const { email, phone, name, city, source } = body;
 
     // ===============================
@@ -21,8 +22,7 @@ export async function POST(req) {
     }
 
     // ===============================
-    // BASIC LEAD SCORING ENGINE
-    // (upgrade later with AI model)
+    // LEAD SCORING ENGINE (V1)
     // ===============================
     let score = 5;
 
@@ -33,44 +33,86 @@ export async function POST(req) {
     score = Math.min(score, 10);
 
     // ===============================
-    // CREATE LEAD (STATE MACHINE INIT)
+    // CREATE LEAD (RAW STATE)
     // ===============================
     const lead = await Lead.create({
       email,
       phone,
       name,
       city: city || null,
+      source: source || "direct",
 
       score,
 
       status: "new",
 
-      // 🔒 STATE LOCK SYSTEM INIT
       locked_at: null,
       lock_owner: null,
       lock_expires_at: null,
 
-      // 💰 billing hooks (future stripe binding)
+      assigned_contractor_id: null,
+
       price: 0,
       billed: false,
-
-      source: source || "direct",
     });
 
     // ===============================
-    // ROUTING ENGINE TRIGGER
-    // (assign contractor immediately)
+    // ROUTING ENGINE (WHO GETS IT)
     // ===============================
-    const routingResult = await routeLead(lead);
+    const assignment = await routeLead(lead);
+
+    if (!assignment?.contractorId) {
+      return Response.json({
+        success: true,
+        lead,
+        routed: false,
+        message: "No contractor available",
+      });
+    }
 
     // ===============================
-    // OPTIONAL: update lead if routed
+    // ATOMIC LOCK (CRITICAL FIX)
+    // prevents double assignment
     // ===============================
-    if (routingResult?.contractorId) {
-      lead.status = "assigned";
-      lead.assigned_contractor_id = routingResult.contractorId;
-      await lead.save();
+    const locked = await lockLead(Lead, lead._id, assignment.contractorId);
+
+    if (!locked) {
+      return Response.json({
+        success: false,
+        error: "Lead already claimed",
+      });
     }
+
+    // ===============================
+    // PRICE ENGINE (REAL MARKET VALUE)
+    // ===============================
+    const price = calculateLeadPrice(score, assignment.cityTier || "basic");
+
+    // ===============================
+    // FINAL ASSIGNMENT UPDATE
+    // ===============================
+    lead.status = "assigned";
+    lead.assigned_contractor_id = assignment.contractorId;
+    lead.price = price;
+
+    await lead.save();
+
+    // ===============================
+    // EVENT LOG (AUDIT TRAIL)
+    // ===============================
+    await Lead.updateOne(
+      { _id: lead._id },
+      {
+        $push: {
+          events: {
+            type: "assigned",
+            contractorId: assignment.contractorId,
+            price,
+            timestamp: new Date(),
+          },
+        },
+      }
+    );
 
     // ===============================
     // RESPONSE
@@ -78,7 +120,12 @@ export async function POST(req) {
     return Response.json({
       success: true,
       lead,
-      routed: !!routingResult,
+      routed: true,
+      assignment: {
+        contractorId: assignment.contractorId,
+        price,
+        city: assignment.city,
+      },
     });
 
   } catch (error) {
