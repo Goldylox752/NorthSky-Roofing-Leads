@@ -12,6 +12,7 @@ export default function Page() {
 
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [leadId, setLeadId] = useState(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -22,27 +23,28 @@ export default function Page() {
     }));
   };
 
+  // ===============================
+  // SUBMIT → EVENT-DRIVEN PIPELINE ENTRY
+  // ===============================
   const handleSubmit = async () => {
     if (loading) return;
 
     if (!form.email || !form.phone) {
-      alert("Please complete required fields.");
+      alert("Email and phone are required.");
       return;
     }
 
     if (!API_URL) {
-      alert("Backend not connected.");
+      alert("System not connected.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/lead`, {
+      const res = await fetch(`${API_URL}/api/leads`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
           source: "landing_page",
@@ -55,17 +57,23 @@ export default function Page() {
         throw new Error(data.error || "Request failed");
       }
 
+      // ===============================
+      // CAPTURE LEAD ID (IMPORTANT FOR TRACKING)
+      // ===============================
+      setLeadId(data.lead?.id || null);
       setSuccess(true);
 
+      // reset form
       setForm({
         name: "",
         email: "",
         phone: "",
         city: "",
       });
+
     } catch (err) {
       console.error(err);
-      alert("Something went wrong. Please try again.");
+      alert("Submission failed. Try again.");
     } finally {
       setLoading(false);
     }
@@ -80,7 +88,6 @@ export default function Page() {
 
         <p style={styles.subtext}>
           RoofFlow delivers exclusive, high-intent roofing jobs directly to contractors.
-          No competition. No wasted spend.
         </p>
 
         {/* SUCCESS STATE */}
@@ -88,73 +95,33 @@ export default function Page() {
           <div style={styles.successBox}>
             <h2>Application Received ✔</h2>
             <p>We’ll review your application within 24 hours.</p>
+
+            {leadId && (
+              <p style={styles.meta}>
+                Tracking ID: {leadId}
+              </p>
+            )}
           </div>
         ) : (
           <div style={styles.formBox}>
-            <input
-              name="name"
-              placeholder="Name"
-              value={form.name}
-              onChange={handleChange}
-              style={styles.input}
-            />
-            <input
-              name="email"
-              placeholder="Email *"
-              value={form.email}
-              onChange={handleChange}
-              style={styles.input}
-            />
-            <input
-              name="phone"
-              placeholder="Phone *"
-              value={form.phone}
-              onChange={handleChange}
-              style={styles.input}
-            />
-            <input
-              name="city"
-              placeholder="Service City"
-              value={form.city}
-              onChange={handleChange}
-              style={styles.input}
-            />
+            <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
+            <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
+            <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
+            <input name="city" placeholder="Service City" value={form.city} onChange={handleChange} style={styles.input} />
 
             <button
               onClick={handleSubmit}
               disabled={loading}
-              style={{
-                ...styles.button,
-                opacity: loading ? 0.7 : 1,
-              }}
+              style={{ ...styles.button, opacity: loading ? 0.7 : 1 }}
             >
-              {loading ? "Processing..." : "Apply For Exclusive Access"}
+              {loading ? "Submitting..." : "Apply For Exclusive Access"}
             </button>
 
             <p style={styles.micro}>
-              ⚡ Only 2–3 contractors accepted per city
+              ⚡ Limited contractor slots per city
             </p>
           </div>
         )}
-
-        <div style={styles.section}>
-          <h2>What You Get</h2>
-          <ul style={styles.list}>
-            <li>✔ High-intent homeowner requests</li>
-            <li>✔ AI-qualified leads (no tire kickers)</li>
-            <li>✔ Direct SMS + call delivery</li>
-            <li>✔ Zero shared leads</li>
-          </ul>
-        </div>
-
-        <div style={styles.section}>
-          <h2>Why Contractors Are Switching</h2>
-          <ul style={styles.list}>
-            <li>❌ Paying for junk leads</li>
-            <li>❌ Competing with multiple contractors</li>
-            <li>❌ Wasting ad spend</li>
-          </ul>
-        </div>
       </div>
     </main>
   );
