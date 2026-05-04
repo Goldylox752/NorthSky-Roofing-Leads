@@ -12,6 +12,8 @@ if (process.env.NODE_ENV !== "production") {
 // =====================
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const twilio = require("twilio");
 const Stripe = require("stripe");
 
@@ -27,10 +29,23 @@ const fetchFn =
 // APP INIT
 // =====================
 const app = express();
+
+// =====================
+// SECURITY MIDDLEWARE (IMPORTANT)
+// =====================
+app.use(helmet());
+
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 120, // prevents abuse
+  })
+);
+
 app.use(express.json());
 
 // =====================
-// ENV
+// ENV VALIDATION (FAIL FAST)
 // =====================
 const {
   TWILIO_SID,
@@ -41,6 +56,10 @@ const {
   OLLAMA_URL,
   PORT,
 } = process.env;
+
+if (!FRONTEND_URL) {
+  console.warn("⚠️ FRONTEND_URL missing");
+}
 
 // =====================
 // CLIENTS
@@ -55,6 +74,29 @@ const stripe = STRIPE_SECRET_KEY
   : null;
 
 // =====================
+// CORS (HARDENED)
+// =====================
+app.use(
+  cors({
+    origin: FRONTEND_URL || "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+  })
+);
+
+// =====================
+// SAFE RESPONSE WRAPPER
+// =====================
+const asyncHandler = (fn) => (req, res) =>
+  Promise.resolve(fn(req, res)).catch((err) => {
+    console.error("🔥 Unhandled error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  });
+
+// =====================
 // SYSTEM STATUS
 // =====================
 console.log("🚀 RoofFlow Core Boot:", {
@@ -64,29 +106,22 @@ console.log("🚀 RoofFlow Core Boot:", {
 });
 
 // =====================
-// CORS
-// =====================
-app.use(
-  cors({
-    origin: FRONTEND_URL || "*",
-    methods: ["GET", "POST"],
-  })
-);
-
-// =====================
 // HEALTH CHECK
 // =====================
 app.get("/", (_, res) => {
-  res.json({ status: "ok", service: "RoofFlow Core Engine" });
+  res.json({
+    status: "ok",
+    service: "RoofFlow Core Engine",
+  });
 });
 
 // ======================================================
-// 🧠 CORE PRICING ENGINE (MARKET RULES)
+// 🧠 PRICING ENGINE
 // ======================================================
 const LEAD_TIERS = {
-  low: 1500,   // $15
-  mid: 3000,   // $30
-  high: 5000,  // $50
+  low: 1500,
+  mid: 3000,
+  high: 5000,
 };
 
 const SUBSCRIPTIONS = {
@@ -101,9 +136,6 @@ const CITY_MULTIPLIER = {
   exclusive: 3,
 };
 
-// =====================
-// LEAD VALUE ENGINE
-// =====================
 function calculateLeadValue(score = 5, cityTier = "basic") {
   const base =
     score >= 8
@@ -120,7 +152,7 @@ function calculateLeadValue(score = 5, cityTier = "basic") {
 // ======================================================
 // 🧠 AI ROUTER
 // ======================================================
-const FALLBACK = "Are you available this week for a quick roof inspection?";
+const FALLBACK = "Are you available this week for a roof inspection?";
 
 async function aiReply(prompt) {
   if (!OLLAMA_URL) return FALLBACK;
@@ -150,48 +182,22 @@ async function aiReply(prompt) {
 }
 
 // ======================================================
-// 📦 DRIP SYSTEM (ASYNC SAFE)
+// 📥 LEAD ENGINE
 // ======================================================
-function sendDrip(phone) {
-  if (!twilioClient || !phone) return;
-
-  const steps = [
-    { delay: 0, text: "We received your request." },
-    { delay: 3600000, text: "Contractor availability is limited." },
-    { delay: 86400000, text: "Still want a roofing estimate?" },
-    { delay: 172800000, text: "Final reminder — slots closing." },
-  ];
-
-  steps.forEach((step) => {
-    setTimeout(async () => {
-      try {
-        await twilioClient.messages.create({
-          body: step.text,
-          from: TWILIO_PHONE,
-          to: phone,
-        });
-      } catch (err) {
-        console.error("Drip error:", err.message);
-      }
-    }, step.delay);
-  });
-}
-
-// ======================================================
-// 📥 LEAD ENGINE (CORE ROUTING ENTRY)
-// ======================================================
-app.post("/api/lead", async (req, res) => {
-  try {
+app.post(
+  "/api/lead",
+  asyncHandler(async (req, res) => {
     const { phone, score = 5, cityTier = "basic" } = req.body || {};
 
     if (!phone) {
-      return res.status(400).json({ error: "Missing phone" });
+      return res.status(400).json({
+        success: false,
+        error: "Missing phone",
+      });
     }
 
-    // 💰 CALCULATE MARKET VALUE
     const leadValue = calculateLeadValue(score, cityTier);
 
-    // 📡 SMS CONFIRMATION
     if (twilioClient) {
       await twilioClient.messages.create({
         body: `Lead received. Value: $${(leadValue / 100).toFixed(2)}`,
@@ -200,35 +206,35 @@ app.post("/api/lead", async (req, res) => {
       });
     }
 
-    // 🔁 DRIP SEQUENCE
-    sendDrip(phone);
-
-    // 🧾 RESPONSE
     return res.json({
       success: true,
       leadValue,
       tier: cityTier,
     });
-  } catch (err) {
-    console.error("Lead error:", err.message);
-    return res.status(500).json({ error: "Lead error" });
-  }
-});
+  })
+);
 
 // ======================================================
-// 💳 STRIPE CHECKOUT ENGINE
+// 💳 STRIPE CHECKOUT
 // ======================================================
-app.post("/api/checkout", async (req, res) => {
-  try {
+app.post(
+  "/api/checkout",
+  asyncHandler(async (req, res) => {
     if (!stripe) {
-      return res.status(500).json({ error: "Stripe missing" });
+      return res.status(500).json({
+        success: false,
+        error: "Stripe not configured",
+      });
     }
 
     const { plan, email, phone } = req.body || {};
     const amount = SUBSCRIPTIONS[plan];
 
     if (!amount) {
-      return res.status(400).json({ error: "Invalid plan" });
+      return res.status(400).json({
+        success: false,
+        error: "Invalid plan",
+      });
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -241,8 +247,7 @@ app.post("/api/checkout", async (req, res) => {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `RoofFlow ${plan.toUpperCase()}`,
-              description: "Lead routing + city access system",
+              name: `RoofFlow ${plan}`,
             },
             unit_amount: amount,
           },
@@ -250,29 +255,20 @@ app.post("/api/checkout", async (req, res) => {
         },
       ],
 
-      success_url: `${FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${FRONTEND_URL}/success`,
       cancel_url: `${FRONTEND_URL}/cancel`,
-
-      metadata: {
-        plan,
-        email,
-        phone,
-        source: "roofflow_core",
-      },
     });
 
-    return res.json({ url: session.url });
-  } catch (err) {
-    console.error("Stripe error:", err.message);
-    return res.status(500).json({ error: "Checkout failed" });
-  }
-});
+    res.json({ success: true, url: session.url });
+  })
+);
 
 // ======================================================
-// 📩 SMS AI ROUTER
+// 📩 SMS ROUTER
 // ======================================================
-app.post("/sms", async (req, res) => {
-  try {
+app.post(
+  "/sms",
+  asyncHandler(async (req, res) => {
     const msg = req.body?.Body;
     const from = req.body?.From;
 
@@ -288,12 +284,9 @@ app.post("/sms", async (req, res) => {
       });
     }
 
-    return res.sendStatus(200);
-  } catch (err) {
-    console.error("SMS error:", err.message);
-    return res.sendStatus(200);
-  }
-});
+    res.sendStatus(200);
+  })
+);
 
 // =====================
 // START SERVER
