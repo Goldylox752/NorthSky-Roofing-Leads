@@ -3,17 +3,29 @@
 import { useState } from "react";
 
 export default function Page() {
-  const [email, setEmail] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    city: "",
+  });
+
   const [loading, setLoading] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-  const handleSubmit = async () => {
-    if (!email) return;
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
 
-    // 🔒 safety check (prevents undefined calls)
+  const handleSubmit = async () => {
+    if (!form.email || !form.phone) {
+      alert("Please complete required fields.");
+      return;
+    }
+
     if (!API_URL) {
-      alert("Backend not connected. Missing API URL.");
+      alert("Backend not connected.");
       return;
     }
 
@@ -25,16 +37,15 @@ export default function Page() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(form),
       });
 
-      if (!res.ok) throw new Error("Request failed");
+      if (!res.ok) throw new Error();
 
-      alert("Application received. We’ll contact you shortly.");
-      setEmail("");
-    } catch (err) {
-      console.error(err);
-      alert("Something went wrong. Try again.");
+      alert("Application submitted. We’ll contact you within 24 hours.");
+      setForm({ name: "", email: "", phone: "", city: "" });
+    } catch {
+      alert("Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -42,93 +53,142 @@ export default function Page() {
 
   return (
     <main style={styles.main}>
-      {/* HERO */}
-      <section style={styles.hero}>
-        <h1 style={styles.h1}>RoofFlow</h1>
+      <div style={styles.container}>
+        {/* HERO */}
+        <h1 style={styles.h1}>
+          Stop Chasing Roofing Leads.<br />Start Closing Them.
+        </h1>
 
         <p style={styles.subtext}>
-          Exclusive roofing leads delivered directly to your pipeline.
-          No cold calls. No wasted ad spend.
+          RoofFlow delivers exclusive, high-intent roofing jobs directly to
+          contractors. No competition. No wasted spend.
         </p>
 
-        <div style={styles.ctaBox}>
-          <input
-            style={styles.input}
-            placeholder="Enter your email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+        {/* FORM */}
+        <div style={styles.formBox}>
+          <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
+          <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
+          <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
+          <input name="city" placeholder="Service City" value={form.city} onChange={handleChange} style={styles.input} />
 
           <button onClick={handleSubmit} style={styles.button}>
-            {loading ? "Sending..." : "Get Access"}
+            {loading ? "Processing..." : "Apply For Exclusive Access"}
           </button>
+
+          <p style={styles.micro}>
+            ⚡ Only 2–3 contractors accepted per city
+          </p>
         </div>
 
-        <p style={styles.micro}>⚡ Limited contractor spots available</p>
-      </section>
+        {/* VALUE STACK */}
+        <div style={styles.section}>
+          <h2>What You Get</h2>
+          <ul style={styles.list}>
+            <li>✔ High-intent homeowner requests</li>
+            <li>✔ AI-qualified leads (no tire kickers)</li>
+            <li>✔ Direct SMS + call delivery</li>
+            <li>✔ Zero shared leads</li>
+          </ul>
+        </div>
+
+        {/* MECHANISM */}
+        <div style={styles.section}>
+          <h2>How It Works</h2>
+          <p style={styles.text}>
+            We capture inbound roofing demand, qualify it using AI, and route
+            only ready-to-buy customers directly to you in real time.
+          </p>
+        </div>
+
+        {/* PAIN */}
+        <div style={styles.section}>
+          <h2>Why Contractors Are Switching</h2>
+          <ul style={styles.list}>
+            <li>❌ Paying for junk leads</li>
+            <li>❌ Competing with 5+ contractors</li>
+            <li>❌ Wasting thousands on ads</li>
+          </ul>
+        </div>
+
+        {/* AUTHORITY / FUTURE PROOF */}
+        <div style={styles.section}>
+          <h2>This Isn’t Lead Gen. It’s Pipeline Control.</h2>
+          <p style={styles.text}>
+            RoofFlow replaces unpredictable marketing with a consistent stream
+            of qualified jobs. Built for contractors who want predictable
+            revenue.
+          </p>
+        </div>
+
+        {/* FINAL CTA */}
+        <div style={styles.finalCta}>
+          <h2>Apply Now</h2>
+          <p style={styles.text}>
+            We review every contractor manually. If approved, you’ll be onboarded
+            within 24 hours.
+          </p>
+        </div>
+      </div>
     </main>
   );
 }
 
-// =====================
-// STYLES
-// =====================
 const styles = {
   main: {
-    height: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
     background: "#0b1220",
     color: "white",
     fontFamily: "system-ui",
+    padding: "40px 20px",
+  },
+  container: {
+    maxWidth: "750px",
+    margin: "0 auto",
     textAlign: "center",
-    padding: "20px",
   },
-
-  hero: {
-    maxWidth: "600px",
-  },
-
   h1: {
-    fontSize: "52px",
-    marginBottom: "10px",
+    fontSize: "48px",
+    marginBottom: "15px",
   },
-
   subtext: {
-    fontSize: "18px",
     opacity: 0.8,
     marginBottom: "30px",
   },
-
-  ctaBox: {
+  formBox: {
     display: "flex",
+    flexDirection: "column",
     gap: "10px",
-    justifyContent: "center",
-    flexWrap: "wrap",
+    marginBottom: "40px",
   },
-
   input: {
     padding: "14px",
     borderRadius: "8px",
     border: "none",
-    width: "250px",
-    outline: "none",
   },
-
   button: {
-    padding: "14px 18px",
+    padding: "16px",
     background: "#4da3ff",
     border: "none",
     borderRadius: "8px",
-    color: "white",
-    cursor: "pointer",
     fontWeight: "bold",
+    cursor: "pointer",
   },
-
   micro: {
-    marginTop: "15px",
     fontSize: "12px",
     opacity: 0.6,
+  },
+  section: {
+    marginTop: "50px",
+  },
+  text: {
+    opacity: 0.8,
+    lineHeight: "1.6",
+  },
+  list: {
+    listStyle: "none",
+    padding: 0,
+    opacity: 0.85,
+  },
+  finalCta: {
+    marginTop: "60px",
   },
 };
