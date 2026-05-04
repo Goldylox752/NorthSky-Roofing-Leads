@@ -1,29 +1,36 @@
 import Sidebar from "@/components/Sidebar";
 
 export default function RootLayout({ children }) {
-  const role = "admin"; // later: from auth
+  // TODO: replace with Supabase auth session
+  const user = {
+    role: "admin", // admin | contractor | viewer
+    name: "System User",
+  };
 
   return (
-    <html>
+    <html lang="en">
       <body style={styles.body}>
-        <Sidebar role={role} />
+        <div style={styles.shell}>
+          {/* SIDEBAR (ROLE AWARE) */}
+          <Sidebar role={user.role} />
 
-        <main style={styles.main}>{children}</main>
+          {/* MAIN APP AREA */}
+          <main style={styles.main}>
+            {/* TOP BAR (future: search / notifications / revenue) */}
+            <header style={styles.topbar}>
+              <div>
+                <h3 style={{ margin: 0 }}>RoofFlow OS</h3>
+                <p style={styles.sub}>
+                  Role: {user.role}
+                </p>
+              </div>
+            </header>
+
+            {/* PAGE CONTENT */}
+            <div style={styles.content}>{children}</div>
+          </main>
+        </div>
       </body>
     </html>
   );
 }
-
-const styles = {
-  body: {
-    display: "flex",
-    margin: 0,
-    fontFamily: "system-ui",
-    background: "#0b1220",
-    color: "white",
-  },
-  main: {
-    flex: 1,
-    padding: 20,
-  },
-};
