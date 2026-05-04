@@ -3,8 +3,8 @@ import { supabase } from "@/lib/supabase";
 export const runtime = "nodejs";
 
 // ===============================
-// GET LEADS (ADMIN DASHBOARD)
-// Pagination + filters + safe query handling
+// GET LEADS (ADMIN + SaaS READY)
+// Supports pagination, filters, scoring, revenue tracking
 // ===============================
 export async function GET(req) {
   try {
@@ -18,26 +18,45 @@ export async function GET(req) {
 
     const status = searchParams.get("status");
     const city = searchParams.get("city");
+    const minScore = searchParams.get("minScore");
+    const contractorId = searchParams.get("contractorId");
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    // base query
     let query = supabase
       .from("leads")
       .select("*", { count: "exact" })
       .order("created_at", { ascending: false })
       .range(from, to);
 
-    // optional filters
-    if (status) query = query.eq("status", status);
-    if (city) query = query.eq("city", city);
+    // ===============================
+    // FILTERS
+    // ===============================
+    if (status) {
+      query = query.eq("status", status);
+    }
+
+    if (city) {
+      query = query.eq("city", city);
+    }
+
+    if (contractorId) {
+      query = query.eq("assigned_contractor_id", contractorId);
+    }
+
+    if (minScore) {
+      query = query.gte("score", parseInt(minScore));
+    }
 
     const { data, error, count } = await query;
 
     if (error) {
       return Response.json(
-        { success: false, error: error.message },
+        {
+          success: false,
+          error: error.message,
+        },
         { status: 500 }
       );
     }
@@ -46,7 +65,11 @@ export async function GET(req) {
 
     return Response.json({
       success: true,
-      leads: data || [],
+      leads: data ?? [],
+      stats: {
+        total,
+        returned: data?.length ?? 0,
+      },
       pagination: {
         page,
         limit,
@@ -54,7 +77,7 @@ export async function GET(req) {
         hasMore: from + limit < total,
       },
     });
-  } catch (error) {
+  } catch (err) {
     return Response.json(
       {
         success: false,
