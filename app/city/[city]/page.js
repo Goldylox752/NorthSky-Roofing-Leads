@@ -1,50 +1,43 @@
 import LeadForm from "@/components/LeadForm";
 
-export default function CityPage({ params }) {
-  const city = decodeURIComponent(params.city).replace(/-/g, " ");
+export default async function CityPage({ params }) {
+  const city = decodeURIComponent(params.city);
+
+  // fetch live city state (Supabase or API)
+  const res = await fetch(
+    process.env.NEXT_PUBLIC_API_URL + `/api/cities/${city}`,
+    { cache: "no-store" }
+  );
+
+  const data = await res.json();
+  const cityData = data.city;
 
   return (
-    <main style={styles.page}>
-      <h1 style={styles.h1}>Roofing Leads in {city}</h1>
+    <main style={page}>
+      <h1>Roofing Leads in {city}</h1>
 
-      <p style={styles.subtext}>
-        Exclusive contractor demand marketplace for {city}.
+      <p>
+        Status: <b>{cityData?.status || "open"}</b> | Tier:{" "}
+        <b>{cityData?.tier}</b>
       </p>
 
-      <div style={styles.box}>
+      <div style={box}>
         <LeadForm city={city} />
       </div>
     </main>
   );
 }
 
-// ===============================
-// STYLES
-// ===============================
-const styles = {
-  page: {
-    background: "#0b1220",
-    color: "white",
-    minHeight: "100vh",
-    padding: 40,
-  },
+const page = {
+  background: "#0b1220",
+  minHeight: "100vh",
+  color: "white",
+  padding: 40,
+};
 
-  h1: {
-    fontSize: 32,
-    marginBottom: 10,
-  },
-
-  subtext: {
-    opacity: 0.7,
-    marginBottom: 20,
-  },
-
-  box: {
-    marginTop: 20,
-    padding: 20,
-    background: "#111a2e",
-    borderRadius: 10,
-    border: "1px solid #1f2937",
-    maxWidth: 500,
-  },
+const box = {
+  marginTop: 20,
+  padding: 20,
+  background: "#111827",
+  borderRadius: 10,
 };
