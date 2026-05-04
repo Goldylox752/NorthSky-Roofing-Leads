@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
-// ⚠️ Move this to .env in production
+// ===============================
+// CONFIG (SAFE + DEPLOY READY)
+// ===============================
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://your-render-app.onrender.com";
@@ -13,21 +15,33 @@ export default function BuyLeads() {
   // ===============================
   // STRIPE CHECKOUT HANDLER
   // ===============================
-  const buyLead = async (priceId) => {
+  const buyLead = async (plan) => {
     try {
-      setLoading(priceId);
+      setLoading(plan.id);
 
       const res = await fetch(`${API_URL}/api/checkout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+
+        // ===============================
+        // MARKETPLACE CONTEXT (IMPORTANT)
+        // ===============================
         body: JSON.stringify({
-          priceId,
+          priceId: plan.id,
           mode: "payment",
+
           metadata: {
-            source: "lead_marketplace",
+            source: "roofflow_marketplace",
             product: "roofing_lead",
+
+            // 🧠 NEW: marketplace intelligence layer
+            tier: plan.value,
+            lead_type: plan.name,
+
+            // future city routing support
+            city: "unknown",
           },
         }),
       });
@@ -35,27 +49,28 @@ export default function BuyLeads() {
       const data = await res.json();
 
       if (!res.ok || !data?.url) {
-        throw new Error("Checkout failed");
+        throw new Error(data?.error || "Checkout failed");
       }
 
+      // redirect to Stripe
       window.location.href = data.url;
     } catch (err) {
       console.error("Checkout error:", err.message);
-      alert("Something went wrong. Try again.");
+      alert("Payment failed. Please try again.");
     } finally {
       setLoading(null);
     }
   };
 
   // ===============================
-  // PRODUCTS
+  // PRODUCT TIERS (MARKETPLACE MODEL)
   // ===============================
   const plans = [
     {
       name: "Hot Lead",
       price: "$49",
       id: "price_hot_lead",
-      desc: "Recently submitted homeowner. High intent.",
+      desc: "Recently submitted homeowner. High intent but shared.",
       highlight: false,
       value: "low",
     },
@@ -63,7 +78,7 @@ export default function BuyLeads() {
       name: "Verified Lead",
       price: "$99",
       id: "price_verified_lead",
-      desc: "Phone + email verified. Ready to talk.",
+      desc: "Phone + email verified. Strong buying intent.",
       highlight: true,
       value: "medium",
     },
@@ -71,12 +86,15 @@ export default function BuyLeads() {
       name: "Exclusive Lead",
       price: "$149",
       id: "price_exclusive_lead",
-      desc: "Sold once. No competition. Highest close rate.",
+      desc: "Sold once. No competition. Highest conversion rate.",
       highlight: false,
       value: "high",
     },
   ];
 
+  // ===============================
+  // UI
+  // ===============================
   return (
     <main className="max-w-5xl mx-auto px-6 py-20 text-center">
       {/* HEADER */}
@@ -99,19 +117,26 @@ export default function BuyLeads() {
                 : "border-gray-200"
             }`}
           >
+            {/* badge */}
             {plan.highlight && (
-              <p className="text-xs font-bold mb-2">MOST POPULAR</p>
+              <p className="text-xs font-bold mb-2">
+                MOST POPULAR
+              </p>
             )}
 
             <h2 className="text-xl font-bold">{plan.name}</h2>
 
-            <p className="text-3xl font-bold mt-2">{plan.price}</p>
+            <p className="text-3xl font-bold mt-2">
+              {plan.price}
+            </p>
 
-            <p className="text-gray-500 mt-2 text-sm">{plan.desc}</p>
+            <p className="text-gray-500 mt-2 text-sm">
+              {plan.desc}
+            </p>
 
             {/* CTA */}
             <button
-              onClick={() => buyLead(plan.id)}
+              onClick={() => buyLead(plan)}
               disabled={loading === plan.id}
               className={`mt-6 w-full py-3 rounded-lg font-medium transition ${
                 loading === plan.id
@@ -119,7 +144,9 @@ export default function BuyLeads() {
                   : "bg-black text-white hover:opacity-90"
               }`}
             >
-              {loading === plan.id ? "Processing..." : "Buy Now"}
+              {loading === plan.id
+                ? "Processing..."
+                : "Buy Now"}
             </button>
           </div>
         ))}
@@ -127,7 +154,7 @@ export default function BuyLeads() {
 
       {/* FOOTER */}
       <p className="text-xs text-gray-400 mt-10">
-        Limited supply per city. Leads are routed instantly after purchase.
+        Leads are processed instantly and routed through our AI system.
       </p>
     </main>
   );
