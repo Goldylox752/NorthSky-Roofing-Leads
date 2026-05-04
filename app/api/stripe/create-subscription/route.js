@@ -11,9 +11,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 // ===============================
 // CREATE CHECKOUT SESSION
-// Supports:
-// - subscriptions (monthly SaaS)
-// - one-time payments (city access / leads)
+// SaaS + Marketplace + City Ownership Layer
 // ===============================
 export async function POST(req) {
   try {
@@ -21,8 +19,11 @@ export async function POST(req) {
 
     const {
       priceId,
-      mode = "payment",
+      mode = "payment", // payment | subscription
       email,
+      city,
+      contractorId,
+      planTier,
       metadata = {},
     } = body;
 
@@ -44,10 +45,10 @@ export async function POST(req) {
     }
 
     // ===============================
-    // STRIPE SESSION
+    // STRIPE SESSION BUILD
     // ===============================
     const session = await stripe.checkout.sessions.create({
-      mode, // "payment" | "subscription"
+      mode,
 
       payment_method_types: ["card"],
 
@@ -61,18 +62,31 @@ export async function POST(req) {
       ],
 
       // ===============================
-      // REDIRECTS
+      // REDIRECT FLOW
       // ===============================
       success_url: `${process.env.NEXT_PUBLIC_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_URL}/cancel`,
 
       // ===============================
-      // SAAS + MARKETPLACE CONTEXT
+      // MARKETPLACE / ROUTING CONTEXT
       // ===============================
       metadata: {
         source: "roofflow",
+        system: "lead_marketplace",
+
+        // 🏙 city ownership layer
+        city: city || "unknown",
+
+        // 🧑‍💼 contractor assignment (future-proof)
+        contractorId: contractorId || null,
+
+        // 💎 tier system (basic | priority | exclusive)
+        planTier: planTier || "basic",
+
+        // 💰 billing mode
         mode,
-        email,
+
+        // original metadata passthrough
         ...metadata,
       },
     });
@@ -80,10 +94,11 @@ export async function POST(req) {
     return Response.json({
       success: true,
       url: session.url,
+      sessionId: session.id,
     });
 
   } catch (err) {
-    console.error("🔥 Stripe checkout error:", err.message);
+    console.error("🔥 Stripe checkout error:", err);
 
     return Response.json(
       {
