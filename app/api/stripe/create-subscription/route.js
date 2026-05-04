@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 
+export const runtime = "nodejs";
+
 // =====================
 // STRIPE INIT (SAFE)
 // =====================
@@ -9,34 +11,42 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 
 // =====================
 // CREATE CHECKOUT SESSION
+// SaaS: subscriptions + pay-per-lead support
 // =====================
 export async function POST(req) {
   try {
-    const { priceId, mode = "payment", email, metadata = {} } =
-      await req.json();
+    const body = await req.json();
 
-    // ---------------------
+    const {
+      priceId,
+      mode = "payment", // "payment" | "subscription"
+      email,
+      metadata = {},
+    } = body;
+
+    // =====================
     // VALIDATION
-    // ---------------------
+    // =====================
     if (!priceId) {
       return Response.json(
-        { error: "Missing priceId" },
+        { success: false, error: "Missing priceId" },
         { status: 400 }
       );
     }
 
     if (!process.env.NEXT_PUBLIC_URL) {
       return Response.json(
-        { error: "Missing NEXT_PUBLIC_URL" },
+        { success: false, error: "Missing NEXT_PUBLIC_URL" },
         { status: 500 }
       );
     }
 
-    // ---------------------
-    // SESSION CREATE
-    // ---------------------
+    // =====================
+    // CREATE CHECKOUT SESSION
+    // =====================
     const session = await stripe.checkout.sessions.create({
-      mode, // "payment" or "subscription"
+      mode,
+
       payment_method_types: ["card"],
 
       customer_email: email || undefined,
@@ -48,19 +58,34 @@ export async function POST(req) {
         },
       ],
 
+      // =====================
+      // REDIRECTS
+      // =====================
       success_url: `${process.env.NEXT_PUBLIC_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_URL}/cancel`,
 
-      metadata,
+      // =====================
+      // SAAS TRACKING LAYER
+      // =====================
+      metadata: {
+        source: "roofflow",
+        ...metadata,
+      },
     });
 
-    return Response.json({ url: session.url });
+    return Response.json({
+      success: true,
+      url: session.url,
+    });
 
   } catch (err) {
-    console.error("Stripe error:", err.message);
+    console.error("🔥 Stripe checkout error:", err);
 
     return Response.json(
-      { error: "Checkout session failed" },
+      {
+        success: false,
+        error: "Checkout session failed",
+      },
       { status: 500 }
     );
   }
