@@ -21,10 +21,13 @@ export async function POST(req) {
       );
     }
 
+    const identity = email || phone;
+    const normalizedCity = city?.toLowerCase().trim() || "global";
+
     // ===============================
-    // IDEMPOTENCY KEY (ANTI-DUPLICATE)
+    // IDEMPOTENCY KEY (HARD SAFETY LAYER)
     // ===============================
-    const dedupeKey = `${email || phone}-${city || "global"}`;
+    const dedupeKey = `${identity}-${normalizedCity}`;
 
     const existing = await Lead.findOne({ dedupeKey });
 
@@ -33,15 +36,14 @@ export async function POST(req) {
         success: true,
         lead: existing,
         routed: false,
-        message: "Duplicate lead prevented",
+        duplicate: true,
       });
     }
 
     // ===============================
-    // LEAD SCORING ENGINE (V1)
+    // SCORING ENGINE (V1)
     // ===============================
     let score = 5;
-
     if (email) score += 1;
     if (phone) score += 2;
     if (city) score += 1;
@@ -63,11 +65,11 @@ export async function POST(req) {
       score,
       status: "new",
 
+      assigned_contractor_id: null,
+
       locked_at: null,
       lock_owner: null,
       lock_expires_at: null,
-
-      assigned_contractor_id: null,
 
       price: 0,
       billed: false,
@@ -82,29 +84,33 @@ export async function POST(req) {
     });
 
     // ===============================
-    // ROUTING ENGINE
+    // ROUTING ENGINE (MARKET DECISION)
     // ===============================
     const assignment = await routeLead(lead);
 
     if (!assignment?.contractorId) {
-      lead.events.push({
-        type: "unassigned",
-        timestamp: new Date(),
-        reason: "no_contractor_available",
-      });
-
-      await lead.save();
+      await Lead.updateOne(
+        { _id: lead._id },
+        {
+          $push: {
+            events: {
+              type: "unassigned",
+              reason: "no_contractor_available",
+              timestamp: new Date(),
+            },
+          },
+        }
+      );
 
       return Response.json({
         success: true,
         lead,
         routed: false,
-        message: "No contractor available",
       });
     }
 
     // ===============================
-    // HARD LOCK (ATOMIC STATE TRANSITION)
+    // ATOMIC LOCK (CRITICAL SAFETY LAYER)
     // ===============================
     const locked = await lockLead(
       Lead,
@@ -114,13 +120,16 @@ export async function POST(req) {
 
     if (!locked) {
       return Response.json(
-        { success: false, error: "Lead already locked" },
+        {
+          success: false,
+          error: "Lead already locked by another contractor",
+        },
         { status: 409 }
       );
     }
 
     // ===============================
-    // PRICE ENGINE (MARKET VALUE)
+    // PRICE ENGINE
     // ===============================
     const price = calculateLeadPrice(
       score,
@@ -128,16 +137,20 @@ export async function POST(req) {
     );
 
     // ===============================
-    // FINAL STATE UPDATE (SINGLE WRITE)
+    // SINGLE ATOMIC UPDATE (SOURCE OF TRUTH)
     // ===============================
-    const updatedLead = await Lead.findByIdAndUpdate(
-      lead._id,
+    const updatedLead = await Lead.findOneAndUpdate(
+      {
+        _id: lead._id,
+        status: "new", // prevents race overwrite
+      },
       {
         $set: {
           status: "assigned",
           assigned_contractor_id: assignment.contractorId,
           price,
           locked_at: new Date(),
+          lock_owner: assignment.contractorId,
         },
         $push: {
           events: {
@@ -152,15 +165,23 @@ export async function POST(req) {
       { new: true }
     );
 
+    if (!updatedLead) {
+      return Response.json(
+        {
+          success: false,
+          error: "State transition failed (race condition)",
+        },
+        { status: 409 }
+      );
+    }
+
     // ===============================
     // RESPONSE
     // ===============================
     return Response.json({
       success: true,
       routed: true,
-
       lead: updatedLead,
-
       assignment: {
         contractorId: assignment.contractorId,
         price,
@@ -169,10 +190,13 @@ export async function POST(req) {
     });
 
   } catch (error) {
-    console.error("🔥 Lead creation error:", error);
+    console.error("🔥 Lead creation crash:", error);
 
     return Response.json(
-      { success: false, error: error.message },
+      {
+        success: false,
+        error: "Internal server error",
+      },
       { status: 500 }
     );
   }
