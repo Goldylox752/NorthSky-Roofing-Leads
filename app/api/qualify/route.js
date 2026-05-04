@@ -1,39 +1,27 @@
 import OpenAI from "openai";
-import Lead from "@/models/Lead";
-import dbConnect from "@/lib/db";
+import Lead from "./models/Lead.js";
+import dbConnect from "./lib/db.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// =====================
-// LEAD SCORING ENGINE
-// =====================
-export async function POST(req) {
+export const scoreLead = async (req, res) => {
   try {
     await dbConnect();
 
-    const { leadId, message } = await req.json();
+    const { leadId, message } = req.body;
 
     if (!leadId) {
-      return Response.json(
-        { success: false, error: "Missing leadId" },
-        { status: 400 }
-      );
+      return res.status(400).json({ success: false, error: "Missing leadId" });
     }
 
     const lead = await Lead.findById(leadId);
 
     if (!lead) {
-      return Response.json(
-        { success: false, error: "Lead not found" },
-        { status: 404 }
-      );
+      return res.status(404).json({ success: false, error: "Lead not found" });
     }
 
-    // =====================
-    // AI SCORING
-    // =====================
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,
@@ -41,7 +29,7 @@ export async function POST(req) {
         {
           role: "system",
           content:
-            "You are a roofing lead qualification system. Score purchase intent from 1-10. ONLY return a number. No words.",
+            "You are a roofing lead qualification system. Score purchase intent from 1-10. ONLY return a number.",
         },
         {
           role: "user",
@@ -51,16 +39,12 @@ export async function POST(req) {
     });
 
     const raw = completion.choices?.[0]?.message?.content || "";
-
     const parsedScore = parseInt(raw.match(/\d+/)?.[0]);
 
     const score = Number.isNaN(parsedScore)
       ? 5
       : Math.max(1, Math.min(10, parsedScore));
 
-    // =====================
-    // BUSINESS LOGIC
-    // =====================
     lead.score = score;
 
     if (score >= 8) {
@@ -73,10 +57,7 @@ export async function POST(req) {
 
     await lead.save();
 
-    // =====================
-    // RESPONSE
-    // =====================
-    return Response.json({
+    return res.json({
       success: true,
       score,
       status: lead.status,
@@ -84,12 +65,9 @@ export async function POST(req) {
   } catch (error) {
     console.error("Scoring error:", error);
 
-    return Response.json(
-      {
-        success: false,
-        error: "Lead scoring failed",
-      },
-      { status: 500 }
-    );
+    return res.status(500).json({
+      success: false,
+      error: "Lead scoring failed",
+    });
   }
-}
+};
