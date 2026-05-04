@@ -6,30 +6,35 @@ export default function Page() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
   const handleSubmit = async () => {
     if (!email) return;
+
+    // 🔒 safety check (prevents undefined calls)
+    if (!API_URL) {
+      alert("Backend not connected. Missing API URL.");
+      return;
+    }
 
     setLoading(true);
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/lead`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ email }),
-        }
-      );
+      const res = await fetch(`${API_URL}/api/lead`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
 
       if (!res.ok) throw new Error("Request failed");
 
       alert("Application received. We’ll contact you shortly.");
       setEmail("");
     } catch (err) {
-      alert("Something went wrong. Try again.");
       console.error(err);
+      alert("Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -42,8 +47,8 @@ export default function Page() {
         <h1 style={styles.h1}>RoofFlow</h1>
 
         <p style={styles.subtext}>
-          Exclusive roofing leads delivered directly to your pipeline. No cold
-          calls. No wasted ad spend.
+          Exclusive roofing leads delivered directly to your pipeline.
+          No cold calls. No wasted ad spend.
         </p>
 
         <div style={styles.ctaBox}>
@@ -65,6 +70,9 @@ export default function Page() {
   );
 }
 
+// =====================
+// STYLES
+// =====================
 const styles = {
   main: {
     height: "100vh",
@@ -83,7 +91,7 @@ const styles = {
   },
 
   h1: {
-    fontSize: "48px",
+    fontSize: "52px",
     marginBottom: "10px",
   },
 
@@ -104,7 +112,8 @@ const styles = {
     padding: "14px",
     borderRadius: "8px",
     border: "none",
-    width: "240px",
+    width: "250px",
+    outline: "none",
   },
 
   button: {
