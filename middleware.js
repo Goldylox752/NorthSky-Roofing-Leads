@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 // ===============================
-// LIGHTWEIGHT AUTH CLIENT
+// EDGE AUTH CLIENT
 // ===============================
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -10,82 +10,104 @@ const supabase = createClient(
 );
 
 // ===============================
-// ROUTE RULES (YOUR SAAS MAP)
+// ROUTE MAP
 // ===============================
-const PROTECTED_ROUTES = {
-  "/dashboard": ["admin", "contractor"],
-  "/admin": ["admin"],
-  "/contractor": ["contractor", "admin"],
-  "/api/wallet": ["contractor"],
-  "/api/lead": ["contractor", "admin"],
-};
+const RULES = [
+  { match: "/dashboard", roles: ["admin", "contractor"] },
+  { match: "/admin", roles: ["admin"] },
+  { match: "/contractor", roles: ["contractor", "admin"] },
+  { match: "/api/wallet", roles: ["contractor"] },
+  { match: "/api/lead", roles: ["contractor", "admin"] },
+];
 
 // ===============================
 // MIDDLEWARE
 // ===============================
 export async function middleware(req) {
   const path = req.nextUrl.pathname;
+  const isApi = path.startsWith("/api/");
 
-  // ignore static + public routes
+  // allow public routes
   if (
-    path.startsWith("/_next") ||
-    path.startsWith("/favicon") ||
     path === "/" ||
-    path.startsWith("/login")
+    path.startsWith("/login") ||
+    path.startsWith("/_next") ||
+    path.startsWith("/favicon")
   ) {
     return NextResponse.next();
   }
 
   const authHeader = req.headers.get("authorization");
 
-  if (!authHeader) {
-    return NextResponse.redirect(new URL("/login", req.url));
+  if (!authHeader?.startsWith("Bearer ")) {
+    return unauthorized(isApi);
   }
 
   const token = authHeader.replace("Bearer ", "");
 
   // ===============================
-  // VERIFY USER
+  // VERIFY SESSION (FAST PATH)
   // ===============================
   const {
     data: { user },
   } = await supabase.auth.getUser(token);
 
   if (!user) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return unauthorized(isApi);
   }
 
   // ===============================
-  // FETCH ROLE (LIGHTWEIGHT CHECK)
+  // ⚡ OPTIMIZATION STRATEGY:
+  // We DO NOT query DB here anymore
+  // Role must be stored in JWT or Supabase user metadata
   // ===============================
-  const { data: profile } = await supabase
-    .from("contractors")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const role =
+    user.user_metadata?.role ||
+    user.app_metadata?.role ||
+    "contractor";
 
-  const role = profile?.role || "contractor";
+  const rule = RULES.find((r) => path.startsWith(r.match));
 
-  // ===============================
-  // ROUTE PROTECTION
-  // ===============================
-  for (const route in PROTECTED_ROUTES) {
-    if (path.startsWith(route)) {
-      const allowedRoles = PROTECTED_ROUTES[route];
-
-      if (!allowedRoles.includes(role)) {
-        return new NextResponse("FORBIDDEN", { status: 403 });
-      }
-    }
+  if (rule && !rule.roles.includes(role)) {
+    return forbidden(isApi);
   }
 
-  // allow request through
   return NextResponse.next();
 }
 
 // ===============================
-// APPLY ONLY TO APP ROUTES
+// HELPERS
+// ===============================
+function unauthorized(isApi) {
+  if (isApi) {
+    return new NextResponse(
+      JSON.stringify({ error: "UNAUTHORIZED" }),
+      { status: 401 }
+    );
+  }
+
+  return NextResponse.redirect(new URL("/login", "http://localhost"));
+}
+
+function forbidden(isApi) {
+  if (isApi) {
+    return new NextResponse(
+      JSON.stringify({ error: "FORBIDDEN" }),
+      { status: 403 }
+    );
+  }
+
+  return new NextResponse("FORBIDDEN", { status: 403 });
+}
+
+// ===============================
+// ROUTE MATCHER
 // ===============================
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/contractor/:path*", "/api/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/admin/:path*",
+    "/contractor/:path*",
+    "/api/:path*",
+  ],
 };
