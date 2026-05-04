@@ -1,3 +1,5 @@
+"use strict";
+
 // =====================
 // ENV SETUP
 // =====================
@@ -13,7 +15,7 @@ const cors = require("cors");
 const twilio = require("twilio");
 const Stripe = require("stripe");
 
-// Node <18 fetch fallback
+// Node fetch fallback (Render-safe)
 const fetchFn =
   global.fetch ||
   ((...args) =>
@@ -38,7 +40,7 @@ const {
 } = process.env;
 
 // =====================
-// ENV DEBUG (SAFE)
+// SAFE DEBUG
 // =====================
 console.log("ENV CHECK:", {
   TWILIO: !!(TWILIO_SID && TWILIO_AUTH_TOKEN),
@@ -48,7 +50,7 @@ console.log("ENV CHECK:", {
 });
 
 // =====================
-// CLIENT INIT
+// CLIENTS
 // =====================
 const twilioClient =
   TWILIO_SID && TWILIO_AUTH_TOKEN
@@ -64,7 +66,12 @@ const stripe = STRIPE_SECRET_KEY
 // =====================
 // MIDDLEWARE
 // =====================
-app.use(cors({ origin: FRONTEND_URL || "*" }));
+app.use(
+  cors({
+    origin: FRONTEND_URL || "*",
+  })
+);
+
 app.use(express.json());
 
 // =====================
@@ -86,17 +93,21 @@ async function askOllama(prompt) {
           {
             role: "system",
             content:
-              "You are a high-conversion roofing sales closer. Ask ONE short question and guide toward booking.",
+              "You are a roofing sales closer. Ask ONE short question and guide toward booking an inspection.",
           },
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            content: prompt || "",
+          },
         ],
         stream: false,
       }),
     });
 
-    if (!res.ok) throw new Error("Bad Ollama response");
+    if (!res.ok) throw new Error("Ollama request failed");
 
     const data = await res.json();
+
     return data?.message?.content || FALLBACK_REPLY;
   } catch (err) {
     console.error("Ollama error:", err.message);
@@ -104,6 +115,9 @@ async function askOllama(prompt) {
   }
 }
 
+// =====================
+// BUSINESS DATA
+// =====================
 const PLANS = {
   starter: 49900,
   growth: 99900,
@@ -113,9 +127,9 @@ const PLANS = {
 function dripSequence() {
   return [
     { delay: 0, text: "Thanks — we received your request." },
-    { delay: 3600000, text: "We only take limited contractors per area." },
-    { delay: 86400000, text: "Still interested in exclusive roofing leads?" },
-    { delay: 172800000, text: "Final reminder — spots are almost full." },
+    { delay: 60 * 60 * 1000, text: "Limited contractors per area." },
+    { delay: 24 * 60 * 60 * 1000, text: "Still interested in exclusive leads?" },
+    { delay: 48 * 60 * 60 * 1000, text: "Final reminder — spots are almost full." },
   ];
 }
 
@@ -141,34 +155,29 @@ function sendDrip(phone, messages) {
 // ROUTES
 // =====================
 
-// Health check
+// Health
 app.get("/", (_, res) => {
-  res.send("🚀 RoofFlow API LIVE");
+  res.status(200).send("🚀 RoofFlow API LIVE");
 });
 
-// ---------------------
+// =====================
 // CHECKOUT
-// ---------------------
+// =====================
 app.post("/api/checkout", async (req, res) => {
   try {
     if (!stripe) {
-      return res.status(500).json({
-        error: "Stripe not configured",
-      });
+      return res.status(500).json({ error: "Stripe not configured" });
     }
 
-    const { plan, email, phone } = req.body;
+    const { plan, email, phone } = req.body || {};
 
     if (!plan || !PLANS[plan]) {
-      return res.status(400).json({
-        error: "Invalid or missing plan",
-      });
+      return res.status(400).json({ error: "Invalid plan" });
     }
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-
       customer_email: email || undefined,
 
       line_items: [
@@ -193,26 +202,21 @@ app.post("/api/checkout", async (req, res) => {
     return res.json({ url: session.url });
   } catch (err) {
     console.error("Checkout error:", err.message);
-    return res.status(500).json({
-      error: "Checkout failed",
-    });
+    return res.status(500).json({ error: "Checkout failed" });
   }
 });
 
-// ---------------------
+// =====================
 // LEAD CAPTURE
-// ---------------------
+// =====================
 app.post("/api/lead", async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone } = req.body || {};
 
     if (!phone) {
-      return res.status(400).json({
-        error: "Missing phone",
-      });
+      return res.status(400).json({ error: "Missing phone" });
     }
 
-    // Immediate response SMS
     if (twilioClient) {
       await twilioClient.messages.create({
         body: "Thanks — we’ll follow up shortly.",
@@ -221,29 +225,24 @@ app.post("/api/lead", async (req, res) => {
       });
     }
 
-    // Drip follow-up
     sendDrip(phone, dripSequence());
 
     return res.json({ success: true });
   } catch (err) {
     console.error("Lead error:", err.message);
-    return res.status(500).json({
-      error: "Lead error",
-    });
+    return res.status(500).json({ error: "Lead error" });
   }
 });
 
-// ---------------------
-// SMS BOT
-// ---------------------
+// =====================
+// SMS WEBHOOK
+// =====================
 app.post("/sms", async (req, res) => {
   try {
     const msg = req.body?.Body;
     const from = req.body?.From;
 
-    if (!msg || !from) {
-      return res.sendStatus(200);
-    }
+    if (!msg || !from) return res.sendStatus(200);
 
     const reply = await askOllama(msg);
 
@@ -263,7 +262,7 @@ app.post("/sms", async (req, res) => {
 });
 
 // =====================
-// START SERVER
+// START SERVER (RENDER SAFE)
 // =====================
 const serverPort = PORT || 3000;
 
@@ -272,6 +271,6 @@ app.listen(serverPort, () => {
 });
 
 // =====================
-// EXPORT (OPTIONAL)
+// EXPORT
 // =====================
 module.exports = app;
