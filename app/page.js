@@ -15,10 +15,14 @@ export default function Page() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    setForm((prev) => ({
+      ...prev,
+      [e.target.name]: e.target.value,
+    }));
   };
 
   const handleSubmit = async () => {
+    // validation
     if (!form.email || !form.phone) {
       alert("Please complete required fields.");
       return;
@@ -40,12 +44,23 @@ export default function Page() {
         body: JSON.stringify(form),
       });
 
-      if (!res.ok) throw new Error();
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error("Request failed");
+      }
 
       alert("Application submitted. We’ll contact you within 24 hours.");
-      setForm({ name: "", email: "", phone: "", city: "" });
-    } catch {
-      alert("Something went wrong.");
+
+      setForm({
+        name: "",
+        email: "",
+        phone: "",
+        city: "",
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -54,17 +69,15 @@ export default function Page() {
   return (
     <main style={styles.main}>
       <div style={styles.container}>
-        {/* HERO */}
         <h1 style={styles.h1}>
           Stop Chasing Roofing Leads.<br />Start Closing Them.
         </h1>
 
         <p style={styles.subtext}>
-          RoofFlow delivers exclusive, high-intent roofing jobs directly to
-          contractors. No competition. No wasted spend.
+          RoofFlow delivers exclusive, high-intent roofing jobs directly to contractors.
+          No competition. No wasted spend.
         </p>
 
-        {/* FORM */}
         <div style={styles.formBox}>
           <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
           <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
@@ -75,12 +88,9 @@ export default function Page() {
             {loading ? "Processing..." : "Apply For Exclusive Access"}
           </button>
 
-          <p style={styles.micro}>
-            ⚡ Only 2–3 contractors accepted per city
-          </p>
+          <p style={styles.micro}>⚡ Only 2–3 contractors accepted per city</p>
         </div>
 
-        {/* VALUE STACK */}
         <div style={styles.section}>
           <h2>What You Get</h2>
           <ul style={styles.list}>
@@ -91,41 +101,19 @@ export default function Page() {
           </ul>
         </div>
 
-        {/* MECHANISM */}
-        <div style={styles.section}>
-          <h2>How It Works</h2>
-          <p style={styles.text}>
-            We capture inbound roofing demand, qualify it using AI, and route
-            only ready-to-buy customers directly to you in real time.
-          </p>
-        </div>
-
-        {/* PAIN */}
         <div style={styles.section}>
           <h2>Why Contractors Are Switching</h2>
           <ul style={styles.list}>
             <li>❌ Paying for junk leads</li>
-            <li>❌ Competing with 5+ contractors</li>
-            <li>❌ Wasting thousands on ads</li>
+            <li>❌ Competing with multiple contractors</li>
+            <li>❌ Wasting ad spend</li>
           </ul>
         </div>
 
-        {/* AUTHORITY / FUTURE PROOF */}
-        <div style={styles.section}>
-          <h2>This Isn’t Lead Gen. It’s Pipeline Control.</h2>
-          <p style={styles.text}>
-            RoofFlow replaces unpredictable marketing with a consistent stream
-            of qualified jobs. Built for contractors who want predictable
-            revenue.
-          </p>
-        </div>
-
-        {/* FINAL CTA */}
         <div style={styles.finalCta}>
           <h2>Apply Now</h2>
           <p style={styles.text}>
-            We review every contractor manually. If approved, you’ll be onboarded
-            within 24 hours.
+            We review every contractor manually. If approved, onboarding happens within 24 hours.
           </p>
         </div>
       </div>
