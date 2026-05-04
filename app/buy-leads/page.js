@@ -1,56 +1,98 @@
 "use client";
 
+import { useState } from "react";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function Buy() {
-  const buy = async (plan) => {
-    const res = await fetch(`${API_URL}/api/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        plan,
-        mode: "payment",
-      }),
-    });
+  const [loadingPlan, setLoadingPlan] = useState(null);
+  const [error, setError] = useState(null);
 
-    const data = await res.json();
-    window.location.href = data.url;
+  const buy = async (plan) => {
+    try {
+      setError(null);
+      setLoadingPlan(plan);
+
+      const res = await fetch(`${API_URL}/api/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          mode: "payment",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.url) {
+        throw new Error(data?.error || "Checkout failed");
+      }
+
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err.message);
+      setLoadingPlan(null);
+    }
   };
 
   return (
     <main style={styles.page}>
-      <h1>Buy Roofing Leads</h1>
+      <div style={styles.container}>
+        <h1 style={styles.title}>Buy Roofing Leads</h1>
+        <p style={styles.sub}>
+          Instant access to live contractor leads marketplace
+        </p>
 
-      <button onClick={() => buy("starter")} style={styles.btn}>
-        Starter ($99)
-      </button>
+        {error && <div style={styles.error}>⚠️ {error}</div>}
 
-      <button onClick={() => buy("growth")} style={styles.btn}>
-        Growth ($199)
-      </button>
+        {/* STARTER */}
+        <button
+          onClick={() => buy("starter")}
+          disabled={loadingPlan}
+          style={{
+            ...styles.btn,
+            opacity: loadingPlan && loadingPlan !== "starter" ? 0.5 : 1,
+          }}
+        >
+          {loadingPlan === "starter"
+            ? "Redirecting..."
+            : "Starter — $99"}
+        </button>
 
-      <button onClick={() => buy("elite")} style={styles.btn}>
-        Elite ($499)
-      </button>
+        {/* GROWTH */}
+        <button
+          onClick={() => buy("growth")}
+          disabled={loadingPlan}
+          style={{
+            ...styles.btn,
+            background: "#2563eb",
+            opacity: loadingPlan && loadingPlan !== "growth" ? 0.5 : 1,
+          }}
+        >
+          {loadingPlan === "growth"
+            ? "Redirecting..."
+            : "Growth — $199"}
+        </button>
+
+        {/* ELITE */}
+        <button
+          onClick={() => buy("elite")}
+          disabled={loadingPlan}
+          style={{
+            ...styles.btn,
+            background: "#16a34a",
+            opacity: loadingPlan && loadingPlan !== "elite" ? 0.5 : 1,
+          }}
+        >
+          {loadingPlan === "elite"
+            ? "Redirecting..."
+            : "Elite — $499"}
+        </button>
+
+        <p style={styles.note}>
+          Secure Stripe checkout • Instant access after payment
+        </p>
+      </div>
     </main>
   );
 }
-
-const styles = {
-  page: {
-    padding: 40,
-    background: "#0b1220",
-    color: "white",
-    minHeight: "100vh",
-  },
-  btn: {
-    display: "block",
-    margin: 10,
-    padding: 15,
-    width: 200,
-    background: "#4da3ff",
-    border: "none",
-    color: "white",
-    cursor: "pointer",
-  },
-};
