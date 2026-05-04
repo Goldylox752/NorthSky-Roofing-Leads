@@ -1,69 +1,56 @@
 import LeadForm from "@/components/LeadForm";
 
 export default function CityPage({ params }) {
-  const city = decodeURIComponent(params.city)
-    .replace(/-/g, " ");
+  const city = decodeURIComponent(params.city).replace(/-/g, " ");
 
   const source = `seo_${city.toLowerCase().replace(/\s+/g, "_")}`;
 
+  // 🏙 CITY MARKETPLACE DATA (temporary logic hook)
+  const cityTier = "exclusive"; // later: fetch from DB
+  const spotsLeft = cityTier === "exclusive" ? 1 : 2;
+  const priceHint = cityTier === "exclusive" ? "$2,000/mo territory" : "$99–$199/mo access";
+
   return (
     <main style={styles.page}>
+      {/* HEADER */}
       <h1 style={styles.h1}>
         Roofing Leads in {city}
       </h1>
 
       <p style={styles.subtext}>
-        Get fast roofing estimates from verified contractors in {city}.
-        No spam. No junk quotes.
+        Exclusive roofing demand in {city} — delivered directly to top contractors.
+        No shared lists. No recycled leads.
       </p>
 
-      {/* 🧲 HIGH-CONVERSION FORM BLOCK */}
+      {/* 🏙 CITY VALUE BLOCK (NEW MONETIZATION LAYER) */}
+      <div style={styles.marketBox}>
+        <h3>🏙 {city} Territory</h3>
+        <p><b>Availability:</b> {cityTier.toUpperCase()}</p>
+        <p><b>Spots left:</b> {spotsLeft}</p>
+        <p><b>Market value:</b> {priceHint}</p>
+      </div>
+
+      {/* 🧲 LEAD FORM */}
       <div style={styles.formBox}>
         <LeadForm source={source} city={city} />
       </div>
 
-      {/* 🔥 TRUST / SEO BOOST SECTION */}
+      {/* 💰 CONTRACTOR CTA (NEW REVENUE LAYER) */}
+      <div style={styles.ctaBox}>
+        <h2>Want Exclusive {city} Leads?</h2>
+        <p>Claim this territory before it’s taken.</p>
+
+        <a href="/pricing" style={styles.ctaButton}>
+          Become Exclusive Contractor
+        </a>
+      </div>
+
+      {/* TRUST */}
       <div style={styles.trust}>
         <p>✔ Verified contractors in {city}</p>
-        <p>✔ Storm damage & repair specialists</p>
-        <p>✔ Fast response (24–72 hours)</p>
+        <p>✔ Storm damage & insurance specialists</p>
+        <p>✔ 24–72 hour response window</p>
       </div>
     </main>
   );
 }
-
-const styles = {
-  page: {
-    padding: "60px 20px",
-    color: "white",
-    background: "#0b1220",
-    minHeight: "100vh",
-  },
-
-  h1: {
-    fontSize: 34,
-    marginBottom: 10,
-  },
-
-  subtext: {
-    opacity: 0.75,
-    marginBottom: 30,
-    maxWidth: 600,
-    lineHeight: 1.5,
-  },
-
-  formBox: {
-    maxWidth: 500,
-    background: "#111a2e",
-    padding: 20,
-    borderRadius: 12,
-    border: "1px solid #24314d",
-  },
-
-  trust: {
-    marginTop: 30,
-    fontSize: 13,
-    opacity: 0.7,
-    lineHeight: 1.8,
-  },
-};
