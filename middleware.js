@@ -1,79 +1,91 @@
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 // ===============================
-// REUSABLE SUPABASE CLIENT
+// LIGHTWEIGHT AUTH CLIENT
 // ===============================
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // 🔥 server trust boundary
+  process.env.SUPABASE_ANON_KEY
 );
 
 // ===============================
-// REQUIRE USER (SAAS-GRADE)
+// ROUTE RULES (YOUR SAAS MAP)
 // ===============================
-export async function requireUser(req) {
-  try {
-    const authHeader = req.headers.get("authorization");
+const PROTECTED_ROUTES = {
+  "/dashboard": ["admin", "contractor"],
+  "/admin": ["admin"],
+  "/contractor": ["contractor", "admin"],
+  "/api/wallet": ["contractor"],
+  "/api/lead": ["contractor", "admin"],
+};
 
-    if (!authHeader?.startsWith("Bearer ")) {
-      const err = new Error("UNAUTHORIZED");
-      err.code = "NO_TOKEN";
-      throw err;
-    }
+// ===============================
+// MIDDLEWARE
+// ===============================
+export async function middleware(req) {
+  const path = req.nextUrl.pathname;
 
-    const token = authHeader.replace("Bearer ", "").trim();
-
-    // ===============================
-    // VERIFY SESSION
-    // ===============================
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
-
-    if (error || !user) {
-      const err = new Error("UNAUTHORIZED");
-      err.code = "INVALID_TOKEN";
-      throw err;
-    }
-
-    // ===============================
-    // LOAD SAAS PROFILE (ONE SOURCE OF TRUTH)
-    // ===============================
-    const { data: profile, error: profileError } = await supabase
-      .from("contractors")
-      .select("id, role, balance_cents, city, active, name")
-      .eq("id", user.id)
-      .single();
-
-    if (profileError) {
-      const err = new Error("PROFILE_NOT_FOUND");
-      err.code = "NO_PROFILE";
-      throw err;
-    }
-
-    // ===============================
-    // RETURN ENRICHED IDENTITY
-    // ===============================
-    return {
-      id: user.id,
-      email: user.email,
-
-      role: profile?.role || "contractor",
-      contractorId: profile?.id,
-
-      name: profile?.name || null,
-      city: profile?.city || null,
-      active: profile?.active ?? false,
-
-      balance: profile?.balance_cents || 0,
-    };
-
-  } catch (err) {
-    // structured error (important for debugging + logs)
-    throw {
-      message: err.message || "UNAUTHORIZED",
-      code: err.code || "AUTH_ERROR",
-    };
+  // ignore static + public routes
+  if (
+    path.startsWith("/_next") ||
+    path.startsWith("/favicon") ||
+    path === "/" ||
+    path.startsWith("/login")
+  ) {
+    return NextResponse.next();
   }
+
+  const authHeader = req.headers.get("authorization");
+
+  if (!authHeader) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+
+  const token = authHeader.replace("Bearer ", "");
+
+  // ===============================
+  // VERIFY USER
+  // ===============================
+  const {
+    data: { user },
+  } = await supabase.auth.getUser(token);
+
+  if (!user) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+
+  // ===============================
+  // FETCH ROLE (LIGHTWEIGHT CHECK)
+  // ===============================
+  const { data: profile } = await supabase
+    .from("contractors")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const role = profile?.role || "contractor";
+
+  // ===============================
+  // ROUTE PROTECTION
+  // ===============================
+  for (const route in PROTECTED_ROUTES) {
+    if (path.startsWith(route)) {
+      const allowedRoles = PROTECTED_ROUTES[route];
+
+      if (!allowedRoles.includes(role)) {
+        return new NextResponse("FORBIDDEN", { status: 403 });
+      }
+    }
+  }
+
+  // allow request through
+  return NextResponse.next();
 }
+
+// ===============================
+// APPLY ONLY TO APP ROUTES
+// ===============================
+export const config = {
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/contractor/:path*", "/api/:path*"],
+};
