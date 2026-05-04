@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 // ===============================
-// INIT
+// INIT CLIENTS
 // ===============================
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
@@ -16,91 +16,109 @@ const supabase = createClient(
 );
 
 // ===============================
-// CITY LOCK CHECK (PREVENT DUPLICATES)
+// CITY STATE CHECK (READ ONLY)
 // ===============================
-async function isCityAvailable(city, planTier) {
-  const { data } = await supabase
+async function getCityState(city) {
+  const { data, error } = await supabase
     .from("cities")
     .select("*")
     .eq("city", city)
     .single();
 
-  if (!data) return true;
-
-  // 🏙 exclusivity rules
-  if (planTier === "exclusive" && data.active_contractors?.length >= 1) {
-    return false;
-  }
-
-  if (planTier === "priority" && data.active_contractors?.length >= 3) {
-    return false;
-  }
-
-  return true;
+  if (error) return null;
+  return data;
 }
 
 // ===============================
-// CREATE CHECKOUT SESSION
+// CITY ELIGIBILITY ENGINE
+// ===============================
+function validateCityAvailability(cityRow, planTier) {
+  if (!cityRow) return { ok: true };
+
+  const count = cityRow.active_contractors?.length || 0;
+
+  // EXCLUSIVE = 1 owner only
+  if (planTier === "exclusive" && count >= 1) {
+    return { ok: false, reason: "exclusive_sold" };
+  }
+
+  // PRIORITY = limited pool
+  if (planTier === "priority" && count >= 3) {
+    return { ok: false, reason: "priority_full" };
+  }
+
+  return { ok: true };
+}
+
+// ===============================
+// TEMP CITY RESERVATION (LOCK)
+// ===============================
+async function reserveCityIntent({ city, planTier, contractorId }) {
+  const { error } = await supabase.from("city_intents").insert({
+    city,
+    planTier,
+    contractorId: contractorId || null,
+    status: "pending_payment",
+    locked_at: new Date().toISOString(),
+    lock_expires_at: new Date(Date.now() + 15 * 60 * 1000), // 15 min lock
+  });
+
+  if (error) {
+    throw new Error("City reservation failed");
+  }
+}
+
+// ===============================
+// MAIN CHECKOUT HANDLER
 // ===============================
 export async function POST(req) {
   try {
-    const body = await req.json();
-
     const {
       priceId,
-      mode = "payment",
       email,
       city,
       contractorId,
       planTier = "basic",
+      mode = "payment",
       metadata = {},
-    } = body;
+    } = await req.json();
 
     // ===============================
     // VALIDATION
     // ===============================
-    if (!priceId) {
+    if (!priceId || !city) {
       return Response.json(
-        { success: false, error: "Missing priceId" },
+        { success: false, error: "Missing priceId or city" },
         { status: 400 }
       );
     }
 
-    if (!city) {
-      return Response.json(
-        { success: false, error: "Missing city" },
-        { status: 400 }
-      );
-    }
+    const cityRow = await getCityState(city);
 
-    // ===============================
-    // CITY AVAILABILITY CHECK
-    // ===============================
-    const available = await isCityAvailable(city, planTier);
+    const validation = validateCityAvailability(cityRow, planTier);
 
-    if (!available) {
+    if (!validation.ok) {
       return Response.json(
         {
           success: false,
-          error: "City tier already sold or full",
+          error: "City unavailable",
+          reason: validation.reason,
         },
         { status: 409 }
       );
     }
 
     // ===============================
-    // RESERVE CITY (TEMP LOCK BEFORE PAYMENT)
+    // RESERVE CITY BEFORE PAYMENT
     // ===============================
-    await supabase.from("city_intents").insert({
+    await reserveCityIntent({
       city,
       planTier,
       contractorId,
-      status: "pending_payment",
-      created_at: new Date().toISOString(),
     });
 
     // ===============================
-    // STRIPE SESSION
+    // CREATE STRIPE SESSION
     // ===============================
     const session = await stripe.checkout.sessions.create({
       mode,
@@ -118,15 +136,15 @@ export async function POST(req) {
       cancel_url: `${process.env.NEXT_PUBLIC_URL}/cancel`,
 
       // ===============================
-      // MARKETPLACE CONTEXT (SOURCE OF TRUTH TAGGING)
+      // MARKETPLACE INTENT SYSTEM
       // ===============================
       metadata: {
         system: "roofflow_marketplace",
         city,
         planTier,
         contractorId: contractorId || null,
-        mode,
         intent: "city_purchase",
+        lock: "true",
         ...metadata,
       },
     });
@@ -135,15 +153,17 @@ export async function POST(req) {
       success: true,
       url: session.url,
       sessionId: session.id,
+      city,
+      planTier,
     });
 
   } catch (err) {
-    console.error("🔥 Stripe checkout error:", err);
+    console.error("🔥 Checkout engine error:", err);
 
     return Response.json(
       {
         success: false,
-        error: "Checkout session failed",
+        error: "Checkout failed",
       },
       { status: 500 }
     );
