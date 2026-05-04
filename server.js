@@ -15,7 +15,9 @@ const cors = require("cors");
 const twilio = require("twilio");
 const Stripe = require("stripe");
 
-// fetch fallback
+// =====================
+// SAFE FETCH
+// =====================
 const fetchFn =
   global.fetch ||
   ((...args) =>
@@ -27,6 +29,9 @@ const fetchFn =
 const app = express();
 app.use(express.json());
 
+// =====================
+// ENV
+// =====================
 const {
   TWILIO_SID,
   TWILIO_AUTH_TOKEN,
@@ -50,13 +55,12 @@ const stripe = STRIPE_SECRET_KEY
   : null;
 
 // =====================
-// SAFETY CHECK
+// SYSTEM STATUS
 // =====================
-console.log("SYSTEM STATUS", {
+console.log("🚀 RoofFlow Core Boot:", {
   twilio: !!twilioClient,
   stripe: !!stripe,
   ai: !!OLLAMA_URL,
-  frontend: !!FRONTEND_URL,
 });
 
 // =====================
@@ -70,31 +74,27 @@ app.use(
 );
 
 // =====================
-// HEALTH
+// HEALTH CHECK
 // =====================
 app.get("/", (_, res) => {
   res.json({ status: "ok", service: "RoofFlow Core Engine" });
 });
 
 // ======================================================
-// 💰 MONETIZATION ENGINE (CORE)
+// 🧠 CORE PRICING ENGINE (MARKET RULES)
 // ======================================================
-
-// LEAD PRICING (dynamic marketplace)
-const LEAD_PRICE_TIERS = {
+const LEAD_TIERS = {
   low: 1500,   // $15
   mid: 3000,   // $30
   high: 5000,  // $50
 };
 
-// SUBSCRIPTIONS
-const SUBSCRIPTION_TIERS = {
+const SUBSCRIPTIONS = {
   starter: 9900,
   growth: 19900,
   elite: 49900,
 };
 
-// CITY EXCLUSIVITY MULTIPLIER
 const CITY_MULTIPLIER = {
   basic: 1,
   priority: 1.5,
@@ -105,21 +105,21 @@ const CITY_MULTIPLIER = {
 // LEAD VALUE ENGINE
 // =====================
 function calculateLeadValue(score = 5, cityTier = "basic") {
-  let base =
+  const base =
     score >= 8
-      ? LEAD_PRICE_TIERS.high
+      ? LEAD_TIERS.high
       : score >= 6
-      ? LEAD_PRICE_TIERS.mid
-      : LEAD_PRICE_TIERS.low;
+      ? LEAD_TIERS.mid
+      : LEAD_TIERS.low;
 
   const multiplier = CITY_MULTIPLIER[cityTier] || 1;
 
   return Math.floor(base * multiplier);
 }
 
-// =====================
-// AI RESPONSE
-// =====================
+// ======================================================
+// 🧠 AI ROUTER
+// ======================================================
 const FALLBACK = "Are you available this week for a quick roof inspection?";
 
 async function aiReply(prompt) {
@@ -149,10 +149,10 @@ async function aiReply(prompt) {
   }
 }
 
-// =====================
-// DRIP SYSTEM
-// =====================
-function drip(phone) {
+// ======================================================
+// 📦 DRIP SYSTEM (ASYNC SAFE)
+// ======================================================
+function sendDrip(phone) {
   if (!twilioClient || !phone) return;
 
   const steps = [
@@ -162,23 +162,23 @@ function drip(phone) {
     { delay: 172800000, text: "Final reminder — slots closing." },
   ];
 
-  steps.forEach((m) => {
+  steps.forEach((step) => {
     setTimeout(async () => {
       try {
         await twilioClient.messages.create({
-          body: m.text,
+          body: step.text,
           from: TWILIO_PHONE,
           to: phone,
         });
-      } catch (e) {
-        console.error("Drip error:", e.message);
+      } catch (err) {
+        console.error("Drip error:", err.message);
       }
-    }, m.delay);
+    }, step.delay);
   });
 }
 
 // ======================================================
-// 📥 LEAD CAPTURE + MARKET VALUE ENGINE
+// 📥 LEAD ENGINE (CORE ROUTING ENTRY)
 // ======================================================
 app.post("/api/lead", async (req, res) => {
   try {
@@ -188,22 +188,25 @@ app.post("/api/lead", async (req, res) => {
       return res.status(400).json({ error: "Missing phone" });
     }
 
-    const value = calculateLeadValue(score, cityTier);
+    // 💰 CALCULATE MARKET VALUE
+    const leadValue = calculateLeadValue(score, cityTier);
 
-    // SMS confirmation
+    // 📡 SMS CONFIRMATION
     if (twilioClient) {
       await twilioClient.messages.create({
-        body: `Lead received. Estimated value: $${(value / 100).toFixed(2)}`,
+        body: `Lead received. Value: $${(leadValue / 100).toFixed(2)}`,
         from: TWILIO_PHONE,
         to: phone,
       });
     }
 
-    drip(phone);
+    // 🔁 DRIP SEQUENCE
+    sendDrip(phone);
 
+    // 🧾 RESPONSE
     return res.json({
       success: true,
-      leadValue: value,
+      leadValue,
       tier: cityTier,
     });
   } catch (err) {
@@ -213,7 +216,7 @@ app.post("/api/lead", async (req, res) => {
 });
 
 // ======================================================
-// 💳 STRIPE CHECKOUT (SAAS + LEAD ACCESS)
+// 💳 STRIPE CHECKOUT ENGINE
 // ======================================================
 app.post("/api/checkout", async (req, res) => {
   try {
@@ -222,7 +225,7 @@ app.post("/api/checkout", async (req, res) => {
     }
 
     const { plan, email, phone } = req.body || {};
-    const amount = SUBSCRIPTION_TIERS[plan];
+    const amount = SUBSCRIPTIONS[plan];
 
     if (!amount) {
       return res.status(400).json({ error: "Invalid plan" });
@@ -238,8 +241,8 @@ app.post("/api/checkout", async (req, res) => {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `RoofFlow ${plan}`,
-              description: "Lead routing + territory access",
+              name: `RoofFlow ${plan.toUpperCase()}`,
+              description: "Lead routing + city access system",
             },
             unit_amount: amount,
           },
@@ -250,7 +253,12 @@ app.post("/api/checkout", async (req, res) => {
       success_url: `${FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${FRONTEND_URL}/cancel`,
 
-      metadata: { plan, email, phone },
+      metadata: {
+        plan,
+        email,
+        phone,
+        source: "roofflow_core",
+      },
     });
 
     return res.json({ url: session.url });
