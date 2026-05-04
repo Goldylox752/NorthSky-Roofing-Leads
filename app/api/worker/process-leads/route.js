@@ -1,23 +1,57 @@
 import { getQueuedLeads } from "@/lib/queueLead";
 import { aiScoreLead } from "@/lib/aiScoreLead";
 
+// =====================
+// AI QUEUE WORKER
+// =====================
 export async function GET() {
-  const leads = getQueuedLeads();
+  try {
+    const leads = await getQueuedLeads();
 
-  if (!leads.length) {
-    return Response.json({ message: "No leads" });
-  }
-
-  const results = [];
-
-  for (const lead of leads) {
-    try {
-      const scored = await aiScoreLead(lead);
-      results.push(scored);
-    } catch (err) {
-      console.error("AI worker failed:", err.message);
+    if (!leads || leads.length === 0) {
+      return Response.json({
+        ok: true,
+        message: "No leads in queue",
+        processed: 0,
+      });
     }
-  }
 
-  return Response.json({ processed: results.length });
+    const results = [];
+
+    // =====================
+    // PROCESS LEADS SAFELY
+    // =====================
+    for (const lead of leads) {
+      if (!lead) continue;
+
+      try {
+        const scoredLead = await aiScoreLead(lead);
+
+        if (scoredLead) {
+          results.push(scoredLead);
+        }
+      } catch (err) {
+        console.error(
+          `AI scoring failed for lead ${lead?.id || "unknown"}:`,
+          err.message
+        );
+      }
+    }
+
+    return Response.json({
+      ok: true,
+      processed: results.length,
+      total: leads.length,
+    });
+  } catch (err) {
+    console.error("AI worker crash:", err);
+
+    return Response.json(
+      {
+        ok: false,
+        error: "AI worker failed",
+      },
+      { status: 500 }
+    );
+  }
 }
