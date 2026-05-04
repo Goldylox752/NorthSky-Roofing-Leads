@@ -13,93 +13,101 @@ import { aiScoreLead } from "@/lib/aiScoreLead";
 const CONCURRENCY = 5;
 const MAX_RETRIES = 3;
 
-// 👇 IMPORTANT: unique worker ID (helps debugging multi-render instances)
-const WORKER_ID = `worker_${Math.random().toString(36).slice(2, 8)}`;
+// Unique instance identifier (Render multi-worker safe)
+const WORKER_ID =
+  process.env.WORKER_ID ||
+  `worker_${Math.random().toString(36).slice(2, 8)}`;
 
 // =====================
-// SAFE PROCESSOR
+// PROCESS LEAD
 // =====================
 async function processLead(lead) {
   if (!lead?.id || !lead?.phone) {
-    return { ok: false, reason: "Invalid lead" };
+    return { ok: false, id: lead?.id, reason: "Invalid lead" };
   }
 
   try {
-    // 🔒 atomic lock (critical for multi-worker scaling)
+    // 🔒 atomic lock (prevents duplicate processing across workers)
     const locked = await markLeadProcessing(lead.id, WORKER_ID);
 
     if (!locked) {
-      return { ok: false, reason: "Already locked by another worker" };
+      return { ok: false, id: lead.id, reason: "Already locked" };
     }
 
-    // 🤖 AI SCORING
+    // 🤖 AI scoring
     const scored = await aiScoreLead(lead);
 
     if (!scored) {
       throw new Error("AI returned empty result");
     }
 
-    // ✅ SUCCESS
+    // ✅ success commit
     await markLeadDone(lead.id, scored, WORKER_ID);
 
     return { ok: true, id: lead.id };
   } catch (err) {
-    console.error(`[${WORKER_ID}] Lead ${lead.id} error:`, err.message);
+    console.error(`[${WORKER_ID}] Lead ${lead.id} failed:`, err.message);
 
-    await markLeadFailed(lead.id, err.message, MAX_RETRIES, WORKER_ID);
+    await markLeadFailed(
+      lead.id,
+      err.message,
+      MAX_RETRIES,
+      WORKER_ID
+    );
 
     return { ok: false, id: lead.id };
   }
 }
 
 // =====================
-// PARALLEL WORK EXECUTOR
-// (no batch blocking anymore)
+// TRUE PARALLEL WORKER (STABLE PIPELINE)
 // =====================
 async function runWorker(leads) {
   const results = [];
-
   const queue = [...leads];
-  const active = new Set();
+  const active = new Map();
 
-  function runNext() {
-    if (queue.length === 0) return null;
+  const startNext = async () => {
+    if (queue.length === 0) return;
 
     const lead = queue.shift();
-    const p = processLead(lead)
+
+    const promise = processLead(lead)
       .then((res) => {
         results.push(res);
-        active.delete(p);
+        active.delete(promise);
       })
       .catch((err) => {
-        console.error("Unexpected worker error:", err);
-        active.delete(p);
+        console.error("Worker error:", err.message);
+        active.delete(promise);
       });
 
-    active.add(p);
+    active.set(promise, true);
+  };
 
-    return p;
-  }
-
-  // initial fill
-  for (let i = 0; i < CONCURRENCY; i++) {
-    runNext();
+  // fill initial concurrency slots
+  const initial = Math.min(CONCURRENCY, queue.length);
+  for (let i = 0; i < initial; i++) {
+    await startNext();
   }
 
   // keep pipeline full
   while (queue.length > 0 || active.size > 0) {
     if (active.size < CONCURRENCY && queue.length > 0) {
-      runNext();
+      await startNext();
     }
 
-    await Promise.race(active);
+    // wait for any worker slot to finish
+    if (active.size > 0) {
+      await Promise.race(active.keys());
+    }
   }
 
   return results;
 }
 
 // =====================
-// AI QUEUE WORKER ENDPOINT
+// MAIN ENDPOINT
 // =====================
 export async function GET() {
   const start = Date.now();
@@ -111,22 +119,24 @@ export async function GET() {
       return Response.json({
         ok: true,
         worker: WORKER_ID,
-        message: "No leads in queue",
         processed: 0,
+        message: "No leads in queue",
       });
     }
 
-    console.log(`🚀 [${WORKER_ID}] started with ${leads.length} leads`);
+    console.log(
+      `🚀 [${WORKER_ID}] processing ${leads.length} leads`
+    );
 
     const results = await runWorker(leads);
 
     const processed = results.filter((r) => r.ok).length;
-    const failed = results.filter((r) => !r.ok).length;
+    const failed = results.length - processed;
 
     const duration = Date.now() - start;
 
     console.log(
-      `✅ [${WORKER_ID}] done: ${processed} success / ${failed} failed in ${duration}ms`
+      `✅ [${WORKER_ID}] complete: ${processed} success / ${failed} failed (${duration}ms)`
     );
 
     return Response.json({
@@ -144,7 +154,7 @@ export async function GET() {
       {
         ok: false,
         worker: WORKER_ID,
-        error: "AI worker failed",
+        error: "Worker crash",
       },
       { status: 500 }
     );
