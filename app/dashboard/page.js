@@ -8,129 +8,125 @@ export default function Dashboard() {
   const [connected, setConnected] = useState(false);
 
   const eventRef = useRef(null);
-  const lastEventIdRef = useRef(null);
+  const lastEventId = useRef(null);
   const reconnectTimer = useRef(null);
 
-  // ===============================
-  // SAFE MERGE ENGINE (ANTI-DUP + ORDER FIX)
-  // ===============================
-  const mergeLead = (incoming) => {
-    setLeads((prev) => {
-      const index = prev.findIndex((l) => l.id === incoming.id);
+  const API = process.env.NEXT_PUBLIC_API_URL;
 
-      if (index >= 0) {
+  // ===============================
+  // SMART UPSERT MERGE ENGINE
+  // ===============================
+  const upsertLead = (incoming) => {
+    setLeads((prev) => {
+      const idx = prev.findIndex((l) => l.id === incoming.id);
+
+      if (idx !== -1) {
         const copy = [...prev];
-        copy[index] = {
-          ...copy[index],
-          ...incoming,
-        };
+        copy[idx] = { ...copy[idx], ...incoming };
         return copy;
       }
 
-      return [incoming, ...prev].slice(0, 100);
+      return [incoming, ...prev].slice(0, 150);
     });
   };
 
   // ===============================
-  // REAL-TIME STREAM (PRODUCTION GRADE SSE)
+  // INITIAL STATE SYNC (IMPORTANT FIX)
+  // ===============================
+  const loadSnapshot = async () => {
+    try {
+      const res = await fetch(`${API}/api/leads?limit=50`);
+      const data = await res.json();
+
+      if (data?.leads) {
+        setLeads(data.leads);
+      }
+    } catch (e) {
+      console.error("Snapshot load failed:", e);
+    }
+  };
+
+  // ===============================
+  // REAL-TIME STREAM
   // ===============================
   useEffect(() => {
-    const url = process.env.NEXT_PUBLIC_API_URL;
+    if (!API) return;
 
-    if (!url) return;
+    loadSnapshot();
 
     const connect = () => {
       const es = new EventSource(
-        `${url}/api/leads/stream?lastEventId=${lastEventIdRef.current || ""}`
+        `${API}/api/leads/stream?after=${lastEventId.current || ""}`
       );
 
       eventRef.current = es;
 
-      // ===============================
-      // OPEN
-      // ===============================
-      es.onopen = () => {
-        setConnected(true);
-      };
+      es.onopen = () => setConnected(true);
 
-      // ===============================
-      // MESSAGE HANDLER
-      // ===============================
-      es.onmessage = (event) => {
+      es.onmessage = (e) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(e.data);
 
-          // ===============================
-          // EVENT DEDUP (CRITICAL FIX)
-          // ===============================
-          if (data.eventId && data.eventId === lastEventIdRef.current) {
+          // ignore old/duplicate events
+          if (
+            data.eventId &&
+            data.eventId === lastEventId.current
+          ) {
             return;
           }
 
-          lastEventIdRef.current = data.eventId;
+          lastEventId.current = data.eventId;
 
-          // ===============================
-          // APPLY UPDATE
-          // ===============================
-          mergeLead(data);
+          upsertLead(data);
         } catch (err) {
-          console.error("Parse error:", err);
+          console.error("Stream parse error:", err);
         }
       };
 
-      // ===============================
-      // ERROR + AUTO RECONNECT
-      // ===============================
       es.onerror = () => {
         setConnected(false);
         es.close();
 
-        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        if (reconnectTimer.current)
+          clearTimeout(reconnectTimer.current);
 
-        reconnectTimer.current = setTimeout(connect, 2500);
+        reconnectTimer.current = setTimeout(connect, 3000);
       };
     };
 
     connect();
 
     return () => {
-      if (eventRef.current) eventRef.current.close();
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      eventRef.current?.close();
+      clearTimeout(reconnectTimer.current);
     };
   }, []);
 
   // ===============================
-  // UI STATE
+  // UI
   // ===============================
-  const statusColor = connected ? "#22c55e" : "#ef4444";
-
   return (
     <main style={styles.page}>
       <Navbar />
 
       <div style={styles.container}>
-        {/* HEADER */}
-        <div style={styles.header}>
+        <header style={styles.header}>
           <div>
             <h1 style={styles.title}>Live Lead Feed</h1>
             <p style={styles.sub}>
-              Real-time marketplace activity stream
+              Real-time SaaS marketplace engine
             </p>
           </div>
 
-          <div style={{ ...styles.status, color: statusColor }}>
+          <div style={{ ...styles.status, color: connected ? "#22c55e" : "#ef4444" }}>
             ● {connected ? "LIVE" : "RECONNECTING"}
           </div>
-        </div>
+        </header>
 
-        {/* EMPTY STATE */}
         {leads.length === 0 && (
-          <div style={styles.empty}>
-            Waiting for incoming leads...
-          </div>
+          <div style={styles.empty}>Waiting for leads...</div>
         )}
 
-        {/* LEADS GRID */}
         <div style={styles.grid}>
           {leads.map((l) => (
             <div key={l.id} style={styles.card}>
@@ -139,7 +135,7 @@ export default function Dashboard() {
                 <span style={badge(l.status)}>{l.status}</span>
               </div>
 
-              <p style={styles.text}>⚡ Score: {l.score ?? "N/A"}</p>
+              <p style={styles.text}>⚡ Score: {l.score}</p>
 
               <p style={styles.text}>
                 🧠 Contractor: {l.assigned_contractor_id || "pending"}
@@ -154,4 +150,70 @@ export default function Dashboard() {
       </div>
     </main>
   );
+}
+
+// ===============================
+const styles = {
+  page: {
+    background: "#0b1220",
+    minHeight: "100vh",
+    color: "white",
+  },
+  container: {
+    padding: 40,
+    maxWidth: 1100,
+    margin: "0 auto",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+  title: { fontSize: 28, fontWeight: "bold" },
+  sub: { opacity: 0.6, fontSize: 13 },
+  status: { fontSize: 13, fontWeight: 600 },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+    gap: 12,
+  },
+  card: {
+    background: "#111827",
+    padding: 14,
+    borderRadius: 10,
+    border: "1px solid #1f2937",
+  },
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+  },
+  text: { fontSize: 13, opacity: 0.85, marginTop: 6 },
+  textSmall: { fontSize: 12, opacity: 0.6 },
+  empty: {
+    padding: 20,
+    background: "#111827",
+    borderRadius: 10,
+    textAlign: "center",
+    opacity: 0.7,
+  },
+};
+
+function badge(status) {
+  const base = {
+    fontSize: 11,
+    padding: "2px 8px",
+    borderRadius: 999,
+  };
+
+  return {
+    ...base,
+    background:
+      status === "assigned"
+        ? "#16a34a"
+        : status === "new"
+        ? "#2563eb"
+        : status === "billed"
+        ? "#f59e0b"
+        : "#374151",
+  };
 }
