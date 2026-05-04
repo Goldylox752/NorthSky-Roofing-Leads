@@ -11,6 +11,7 @@ export default function Page() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -22,7 +23,8 @@ export default function Page() {
   };
 
   const handleSubmit = async () => {
-    // validation
+    if (loading) return;
+
     if (!form.email || !form.phone) {
       alert("Please complete required fields.");
       return;
@@ -41,16 +43,19 @@ export default function Page() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          source: "landing_page",
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error("Request failed");
+        throw new Error(data.error || "Request failed");
       }
 
-      alert("Application submitted. We’ll contact you within 24 hours.");
+      setSuccess(true);
 
       setForm({
         name: "",
@@ -78,18 +83,59 @@ export default function Page() {
           No competition. No wasted spend.
         </p>
 
-        <div style={styles.formBox}>
-          <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
-          <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
-          <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
-          <input name="city" placeholder="Service City" value={form.city} onChange={handleChange} style={styles.input} />
+        {/* SUCCESS STATE */}
+        {success ? (
+          <div style={styles.successBox}>
+            <h2>Application Received ✔</h2>
+            <p>We’ll review your application within 24 hours.</p>
+          </div>
+        ) : (
+          <div style={styles.formBox}>
+            <input
+              name="name"
+              placeholder="Name"
+              value={form.name}
+              onChange={handleChange}
+              style={styles.input}
+            />
+            <input
+              name="email"
+              placeholder="Email *"
+              value={form.email}
+              onChange={handleChange}
+              style={styles.input}
+            />
+            <input
+              name="phone"
+              placeholder="Phone *"
+              value={form.phone}
+              onChange={handleChange}
+              style={styles.input}
+            />
+            <input
+              name="city"
+              placeholder="Service City"
+              value={form.city}
+              onChange={handleChange}
+              style={styles.input}
+            />
 
-          <button onClick={handleSubmit} style={styles.button}>
-            {loading ? "Processing..." : "Apply For Exclusive Access"}
-          </button>
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              style={{
+                ...styles.button,
+                opacity: loading ? 0.7 : 1,
+              }}
+            >
+              {loading ? "Processing..." : "Apply For Exclusive Access"}
+            </button>
 
-          <p style={styles.micro}>⚡ Only 2–3 contractors accepted per city</p>
-        </div>
+            <p style={styles.micro}>
+              ⚡ Only 2–3 contractors accepted per city
+            </p>
+          </div>
+        )}
 
         <div style={styles.section}>
           <h2>What You Get</h2>
@@ -109,74 +155,7 @@ export default function Page() {
             <li>❌ Wasting ad spend</li>
           </ul>
         </div>
-
-        <div style={styles.finalCta}>
-          <h2>Apply Now</h2>
-          <p style={styles.text}>
-            We review every contractor manually. If approved, onboarding happens within 24 hours.
-          </p>
-        </div>
       </div>
     </main>
   );
 }
-
-const styles = {
-  main: {
-    background: "#0b1220",
-    color: "white",
-    fontFamily: "system-ui",
-    padding: "40px 20px",
-  },
-  container: {
-    maxWidth: "750px",
-    margin: "0 auto",
-    textAlign: "center",
-  },
-  h1: {
-    fontSize: "48px",
-    marginBottom: "15px",
-  },
-  subtext: {
-    opacity: 0.8,
-    marginBottom: "30px",
-  },
-  formBox: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-    marginBottom: "40px",
-  },
-  input: {
-    padding: "14px",
-    borderRadius: "8px",
-    border: "none",
-  },
-  button: {
-    padding: "16px",
-    background: "#4da3ff",
-    border: "none",
-    borderRadius: "8px",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  micro: {
-    fontSize: "12px",
-    opacity: 0.6,
-  },
-  section: {
-    marginTop: "50px",
-  },
-  text: {
-    opacity: 0.8,
-    lineHeight: "1.6",
-  },
-  list: {
-    listStyle: "none",
-    padding: 0,
-    opacity: 0.85,
-  },
-  finalCta: {
-    marginTop: "60px",
-  },
-};
