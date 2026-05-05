@@ -13,7 +13,14 @@ const supabase = createClient(
 );
 
 // ===============================
-// 🔁 SYNC CONTRACTOR SUBSCRIPTIONS (PAGINATED)
+// 🔐 SAFE LOGGER
+// ===============================
+function log(msg, data) {
+  console.log(`[reconcile] ${msg}`, data || "");
+}
+
+// ===============================
+// 🔁 SYNC SUBSCRIPTIONS (RESUMABLE + SAFE)
 // ===============================
 async function syncSubscriptions() {
   let hasMore = true;
@@ -27,36 +34,50 @@ async function syncSubscriptions() {
     });
 
     for (const sub of res.data) {
-      const customerId = sub.customer;
+      try {
+        const customerId = sub.customer;
 
-      const { data: contractor } = await supabase
-        .from("contractors")
-        .select("id, active, stripe_subscription_id")
-        .eq("stripe_customer_id", customerId)
-        .maybeSingle();
+        const { data: contractor } = await supabase
+          .from("contractors")
+          .select("id, active, stripe_subscription_id")
+          .eq("stripe_customer_id", customerId)
+          .maybeSingle();
 
-      if (!contractor) continue;
+        if (!contractor) continue;
 
-      const shouldBeActive =
-        sub.status === "active" || sub.status === "trialing";
+        const shouldBeActive =
+          sub.status === "active" || sub.status === "trialing";
 
-      const dbMatches =
-        contractor.active === shouldBeActive &&
-        contractor.stripe_subscription_id === sub.id;
+        // 🔐 skip if already correct state
+        if (
+          contractor.active === shouldBeActive &&
+          contractor.stripe_subscription_id === sub.id
+        ) {
+          continue;
+        }
 
-      if (dbMatches) continue;
+        const { error } = await supabase
+          .from("contractors")
+          .update({
+            active: shouldBeActive,
+            stripe_subscription_id: sub.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", contractor.id);
 
-      await supabase
-        .from("contractors")
-        .update({
+        if (error) {
+          log("subscription update failed", error.message);
+          continue;
+        }
+
+        log("reconciled contractor", {
+          id: contractor.id,
           active: shouldBeActive,
-          stripe_subscription_id: sub.id,
-        })
-        .eq("id", contractor.id);
+        });
 
-      console.log(
-        `🔄 Reconciled contractor ${contractor.id} → ${shouldBeActive}`
-      );
+      } catch (err) {
+        log("subscription item error", err.message);
+      }
     }
 
     hasMore = res.has_more;
@@ -65,7 +86,7 @@ async function syncSubscriptions() {
 }
 
 // ===============================
-// 💳 SYNC RECENT CHECKOUTS
+// 💳 SYNC CHECKOUTS (SAFE + IDEMPOTENT)
 // ===============================
 async function syncRecentCheckouts() {
   const sessions = await stripe.checkout.sessions.list({
@@ -73,53 +94,67 @@ async function syncRecentCheckouts() {
   });
 
   for (const session of sessions.data) {
-    if (session.payment_status !== "paid") continue;
+    try {
+      if (session.payment_status !== "paid") continue;
 
-    const email = session.customer_details?.email;
-    if (!email) continue;
+      const email = session.customer_details?.email;
+      if (!email) continue;
 
-    const { data: contractor } = await supabase
-      .from("contractors")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
+      // 🔐 idempotency guard (prevents duplicate inserts)
+      const { data: existing } = await supabase
+        .from("contractors")
+        .select("id")
+        .eq("email", email)
+        .maybeSingle();
 
-    if (!contractor) {
-      await supabase.from("contractors").insert({
+      if (existing) continue;
+
+      const { error } = await supabase.from("contractors").insert({
         email,
         stripe_customer_id: session.customer,
         active: true,
         plan: "pro",
+        created_at: new Date().toISOString(),
       });
 
-      console.log(`🧠 Recovered missing contractor: ${email}`);
+      if (error) {
+        log("checkout recovery failed", error.message);
+        continue;
+      }
+
+      log("recovered contractor", email);
+
+    } catch (err) {
+      log("checkout item error", err.message);
     }
   }
 }
 
 // ===============================
-// 🧹 EVENT DRIFT CHECK
+// 🧹 EVENT DRIFT CHECK (NON-BLOCKING)
 // ===============================
 async function reconcileEvents() {
   const { data: failedEvents } = await supabase
     .from("stripe_events")
-    .select("id")
+    .select("id, type")
     .eq("status", "failed")
     .limit(50);
 
   for (const event of failedEvents || []) {
-    console.log(`⚠️ Needs retry: ${event.id}`);
-    // future: reprocess queue
+    try {
+      log("event retry candidate", event.id);
+
+      // future: requeue system hook
+    } catch (err) {
+      log("event retry error", err.message);
+    }
   }
 }
 
 // ===============================
-// 🧠 MAIN RECONCILIATION JOB
+// 🧠 MAIN JOB
 // ===============================
 export async function GET(req) {
-  // ===============================
-  // 🔐 VERCEL CRON AUTH (CORRECT WAY)
-  // ===============================
   const isCron = req.headers.get("x-vercel-cron");
 
   if (!isCron) {
@@ -129,15 +164,16 @@ export async function GET(req) {
   const start = Date.now();
 
   try {
-    console.log("🚀 Stripe reconciliation started");
+    log("job started");
 
+    // run sequentially (prevents Stripe + Supabase overload)
     await syncSubscriptions();
     await syncRecentCheckouts();
     await reconcileEvents();
 
     const duration = Date.now() - start;
 
-    console.log(`✅ Reconciliation complete (${duration}ms)`);
+    log("job complete", `${duration}ms`);
 
     return Response.json({
       ok: true,
@@ -145,10 +181,10 @@ export async function GET(req) {
     });
 
   } catch (err) {
-    console.error("❌ Reconciliation error:", err);
+    console.error("❌ reconciliation crash:", err);
 
     return Response.json(
-      { ok: false, error: "reconciliation failed" },
+      { ok: false, error: "reconciliation_failed" },
       { status: 500 }
     );
   }
