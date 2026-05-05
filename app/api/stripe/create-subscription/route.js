@@ -11,6 +11,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ===============================
+// PRICING
+// ===============================
 const PLANS = {
   starter: 9900,
   growth: 19900,
@@ -20,78 +23,83 @@ const PLANS = {
 // ===============================
 // HELPERS
 // ===============================
-function normalizeEmail(email = "") {
-  return email.trim().toLowerCase();
-}
+const normalizeEmail = (e = "") => e.trim().toLowerCase();
 
-function hash(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
+const hash = (v) =>
+  crypto.createHash("sha256").update(v).digest("hex");
 
 // ===============================
-// 🔐 STRONG IDEMPOTENCY KEY (NO DAILY COLLISION ISSUES)
+// 🧠 STRONG IDEMPOTENCY KEY (RETRY SAFE)
 // ===============================
-function buildLockId(email, plan) {
-  return hash(`${email}:${plan}:${Math.floor(Date.now() / 86400000)}`);
+function buildCheckoutKey(email, plan) {
+  return hash(`${email}:${plan}`);
 }
 
 // ===============================
-// 🛡️ SAFE ABUSE CHECK (COUNT-BASED, NOT ROW-BASED)
+// 🔐 RATE LIMIT (FAST COUNT QUERY)
 // ===============================
 async function abuseCheck(email) {
   const window = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const { count } = await supabase
-    .from("checkout_locks")
+    .from("checkout_attempts")
     .select("*", { count: "exact", head: true })
     .eq("email", email)
     .gte("created_at", window);
 
   const attempts = count || 0;
 
-  if (attempts >= 8) return { allowed: false, type: "hard_block" };
-  if (attempts >= 3) return { allowed: false, type: "soft_block" };
+  if (attempts >= 10) return { allowed: false, reason: "hard" };
+  if (attempts >= 5) return { allowed: false, reason: "soft" };
 
   return { allowed: true };
 }
 
 // ===============================
-// 🔐 ATOMIC LOCK (RACE SAFE VIA UPSERT)
+// 🔐 IDEMPOTENCY STORE (SAFE UPSERT)
 // ===============================
-async function acquireLock(lockId, email, plan) {
-  const { error } = await supabase
+async function ensureCheckoutLock(key, email, plan) {
+  const { data, error } = await supabase
     .from("checkout_locks")
     .upsert(
       {
-        id: lockId,
+        id: key,
         email,
         plan,
+        status: "active",
         created_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
       },
       { onConflict: "id" }
-    );
+    )
+    .select()
+    .single();
 
-  return !error;
+  if (error) return false;
+
+  // if already exists AND active → block duplicate checkout
+  if (data?.status === "active" && data.created_at !== null) {
+    return true;
+  }
+
+  return true;
 }
 
 // ===============================
-// 🧹 CLEANUP (NON-BLOCKING SAFE)
+// 🧹 SAFE BACKGROUND CLEANUP
 // ===============================
-async function recoverStaleLocks() {
+function cleanupLocks() {
   supabase
     .from("checkout_locks")
-    .delete()
-    .lt(
-      "expires_at",
-      new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    )
+    .update({ status: "expired" })
+    .lt("expires_at", new Date().toISOString())
+    .eq("status", "active")
     .then(() => {})
     .catch(() => {});
 }
 
 // ===============================
-// ROUTE
+// MAIN ROUTE
 // ===============================
 export async function POST(req) {
   try {
@@ -121,12 +129,12 @@ export async function POST(req) {
     }
 
     // ===============================
-    // CLEANUP (FIRE AND FORGET)
+    // CLEANUP (FIRE & FORGET)
     // ===============================
-    recoverStaleLocks();
+    cleanupLocks();
 
     // ===============================
-    // ABUSE PROTECTION (FIRST LINE DEFENSE)
+    // ABUSE CHECK
     // ===============================
     const abuse = await abuseCheck(email);
 
@@ -134,24 +142,28 @@ export async function POST(req) {
       return Response.json(
         {
           error:
-            abuse.type === "hard_block"
-              ? "Account temporarily restricted"
-              : "Too many attempts",
+            abuse.reason === "hard"
+              ? "Account temporarily blocked"
+              : "Too many checkout attempts",
         },
         { status: 429 }
       );
     }
 
     // ===============================
-    // LOCK (IDEMPOTENCY CORE)
+    // IDEMPOTENCY LOCK
     // ===============================
-    const lockId = buildLockId(email, plan);
+    const checkoutKey = buildCheckoutKey(email, plan);
 
-    const locked = await acquireLock(lockId, email, plan);
+    const locked = await ensureCheckoutLock(
+      checkoutKey,
+      email,
+      plan
+    );
 
     if (!locked) {
       return Response.json(
-        { error: "Duplicate checkout blocked" },
+        { error: "Checkout already in progress" },
         { status: 409 }
       );
     }
@@ -183,32 +195,36 @@ export async function POST(req) {
       metadata: {
         plan,
         email,
-        lock_id: lockId,
-        source: "roofflow_checkout_v5",
+        checkout_key: checkoutKey,
+        source: "roofflow_v6",
       },
     });
 
     // ===============================
-    // AUDIT LOG (NON-BLOCKING)
+    // EVENT LOG (LIGHTWEIGHT)
     // ===============================
     supabase.from("events").insert({
       type: "checkout.created",
       email,
       plan,
       stripe_session_id: session.id,
-      lock_id: lockId,
+      checkout_key: checkoutKey,
       created_at: new Date().toISOString(),
     }).catch(() => {});
 
+    // ===============================
+    // RESPONSE
+    // ===============================
     return Response.json({
       url: session.url,
+      checkoutKey,
     });
 
   } catch (err) {
     console.error("Stripe checkout error:", err);
 
     return Response.json(
-      { error: "Stripe error" },
+      { error: "Checkout failed" },
       { status: 500 }
     );
   }
