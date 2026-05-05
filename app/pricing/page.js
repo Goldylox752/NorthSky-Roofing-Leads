@@ -1,34 +1,54 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function Pricing() {
   const [loading, setLoading] = useState(null);
-  const [demandMultiplier, setDemandMultiplier] = useState(1);
+
+  // CURRENT + PREDICTED DEMAND
+  const [currentMultiplier, setCurrentMultiplier] = useState(1);
+  const [forecastMultiplier, setForecastMultiplier] = useState(1);
+  const [city, setCity] = useState("global");
 
   // ===============================
-  // 📡 LIVE DEMAND FETCH (HOOK INTO BACKEND LATER)
+  // 📡 LOAD MARKET INTELLIGENCE
   // ===============================
   useEffect(() => {
     const fetchDemand = async () => {
       try {
-        const res = await fetch("/api/demand-metrics");
+        const res = await fetch("/api/demand-metrics?city=" + city);
         const data = await res.json();
 
-        // fallback safe
-        setDemandMultiplier(data?.multiplier || 1);
-      } catch (e) {
-        setDemandMultiplier(1);
+        setCurrentMultiplier(data?.current || 1);
+        setForecastMultiplier(data?.forecast || data?.current || 1);
+      } catch {
+        setCurrentMultiplier(1);
+        setForecastMultiplier(1);
       }
     };
 
     fetchDemand();
 
-    // refresh every 30s (live pricing feel)
     const interval = setInterval(fetchDemand, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [city]);
 
+  // ===============================
+  // 🧠 STABILIZED PRICE ENGINE
+  // prevents flickering / bot spikes
+  // ===============================
+  const stableMultiplier = useMemo(() => {
+    // blend current + forecast (predictive pricing core)
+    const blended =
+      currentMultiplier * 0.6 + forecastMultiplier * 0.4;
+
+    // clamp for safety (prevents runaway spikes)
+    return Math.min(Math.max(blended, 0.8), 3.0);
+  }, [currentMultiplier, forecastMultiplier]);
+
+  // ===============================
+  // 💳 CHECKOUT
+  // ===============================
   const subscribe = async (priceId) => {
     if (loading) return;
 
@@ -41,8 +61,9 @@ export default function Pricing() {
         body: JSON.stringify({
           priceId,
           mode: "subscription",
-          demandMultiplier, // 🔥 IMPORTANT: send pricing context
-          source: "pricing_page_v2",
+          demandMultiplier: stableMultiplier,
+          city,
+          source: "pricing_predictive_v2",
         }),
       });
 
@@ -55,7 +76,7 @@ export default function Pricing() {
       window.location.href = data.url;
     } catch (err) {
       console.error(err);
-      alert("Checkout failed. Try again.");
+      alert("Checkout failed");
     } finally {
       setLoading(null);
     }
@@ -89,23 +110,21 @@ export default function Pricing() {
   return (
     <main className="bg-white text-gray-900">
 
-      {/* LIVE SYSTEM STATUS */}
+      {/* 🧠 MARKET INTELLIGENCE BAR */}
       <div className="bg-black text-white text-center py-3 text-sm">
-        ⚡ Live demand multiplier:{" "}
-        <span className="font-bold">
-          {demandMultiplier.toFixed(2)}x
-        </span>{" "}
-        — pricing adjusts with lead demand
+        Current: {currentMultiplier.toFixed(2)}x |
+        Forecast: {forecastMultiplier.toFixed(2)}x |
+        Stable: {stableMultiplier.toFixed(2)}x
       </div>
 
       {/* HERO */}
       <section className="max-w-5xl mx-auto px-6 py-16 text-center">
         <h1 className="text-4xl font-bold">
-          Exclusive Roofing Leads by Territory
+          Predictive Roofing Lead Pricing
         </h1>
 
         <p className="mt-4 text-gray-600">
-          Real-time routing engine assigns homeowners to one contractor per city.
+          Prices adjust based on live demand + predicted market saturation.
         </p>
       </section>
 
@@ -113,7 +132,7 @@ export default function Pricing() {
       <section className="max-w-6xl mx-auto px-6 pb-16 grid md:grid-cols-3 gap-8">
         {plans.map((plan) => {
           const dynamicPrice = Math.round(
-            plan.basePrice * demandMultiplier
+            plan.basePrice * stableMultiplier
           );
 
           return (
@@ -125,13 +144,9 @@ export default function Pricing() {
                   : "border border-gray-200"
               }`}
             >
-              {plan.highlight && (
-                <p className="text-xs font-bold mb-2">MOST POPULAR</p>
-              )}
-
               <h2 className="text-xl font-bold">{plan.name}</h2>
 
-              {/* 🔥 DYNAMIC PRICE */}
+              {/* 💰 PREDICTIVE PRICE */}
               <p className="text-2xl font-bold mt-2">
                 ${dynamicPrice} / month
               </p>
@@ -155,7 +170,7 @@ export default function Pricing() {
               </button>
 
               <p className="text-xs text-gray-500 mt-3">
-                Pricing increases with demand. Lock early for lower rates.
+                Prices are forecast-adjusted based on market demand.
               </p>
             </div>
           );
@@ -165,12 +180,8 @@ export default function Pricing() {
       {/* LEAD MARKET */}
       <section className="max-w-5xl mx-auto px-6 pb-20 text-center">
         <h2 className="text-2xl font-bold">
-          Or Buy Individual Leads (Real-Time Market)
+          Real-Time Lead Market
         </h2>
-
-        <p className="text-gray-600 mt-2">
-          Prices fluctuate based on demand + contractor saturation.
-        </p>
 
         <div className="grid md:grid-cols-3 gap-6 mt-10 text-left">
           {[
@@ -182,11 +193,11 @@ export default function Pricing() {
               <h3 className="font-bold">{lead.name}</h3>
 
               <p className="text-gray-600">
-                ${Math.round(lead.base * demandMultiplier)}
+                ${Math.round(lead.base * stableMultiplier)}
               </p>
 
               <p className="text-xs text-gray-500 mt-2">
-                Demand-adjusted pricing
+                Predictively priced inventory
               </p>
             </div>
           ))}
