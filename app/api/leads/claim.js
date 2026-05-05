@@ -11,37 +11,61 @@ export async function POST(req) {
       );
     }
 
+    const now = new Date();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
     // ===============================
-    // ATOMIC CLAIM (RACE CONDITION SAFE)
+    // 🔐 ATOMIC CLAIM (FULL LOCK SAFETY)
     // ===============================
     const { data, error } = await supabase
       .from("leads")
       .update({
         status: "assigned",
         assigned_contractor_id: contractorId,
+
+        // 🔒 locking system
         lock_owner: contractorId,
-        locked_at: new Date().toISOString(),
-        lock_expires_at: new Date(Date.now() + 5 * 60 * 1000),
+        locked_at: now.toISOString(),
+        lock_expires_at: expiresAt.toISOString(),
       })
       .eq("id", leadId)
-      .eq("status", "new") // prevents double claim
+
+      // 🧠 critical: only allow claim if:
+      // - still new OR
+      // - lock expired
+      .or(
+        `status.eq.new,and(lock_expires_at.lt.${now.toISOString()})`
+      )
       .select()
       .single();
 
+    // ===============================
+    // 🚫 FAIL SAFE (already taken)
+    // ===============================
     if (error || !data) {
       return Response.json(
-        { error: "Lead already claimed" },
+        {
+          success: false,
+          error: "Lead already claimed or locked",
+        },
         { status: 409 }
       );
     }
 
+    // ===============================
+    // SUCCESS
+    // ===============================
     return Response.json({
       success: true,
       lead: data,
+      lockedBy: contractorId,
     });
+
   } catch (err) {
+    console.error("Lead claim error:", err);
+
     return Response.json(
-      { error: err.message },
+      { error: "Server error" },
       { status: 500 }
     );
   }
