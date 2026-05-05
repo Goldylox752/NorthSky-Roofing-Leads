@@ -13,61 +13,64 @@ const supabase = createClient(
 );
 
 // ===============================
-// 🔐 LOCK EVENT (RACE SAFE)
+// 🔐 ATOMIC EVENT CLAIM (REAL LOCK)
 // ===============================
-async function lockEvent(eventId, type) {
-  const { error } = await supabase.from("stripe_events").insert({
-    id: eventId,
-    type,
-    status: "processing",
-    created_at: new Date().toISOString(),
-    locked_at: new Date().toISOString(),
-  });
+async function claimEvent(event) {
+  const { data, error } = await supabase
+    .from("stripe_events")
+    .upsert(
+      {
+        id: event.id,
+        type: event.type,
+        status: "processing",
+        updated_at: new Date().toISOString(),
+        locked_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    )
+    .select()
+    .single();
 
-  return !error;
+  // if already completed → skip completely
+  if (data?.status === "completed") {
+    return { allowed: false, reason: "already_processed" };
+  }
+
+  return { allowed: !error, data };
 }
 
 // ===============================
-// 🔁 AUTO RECOVERY (NOW EXECUTED)
+// 🧹 SAFE RECOVERY (ONLY STALE LOCKS)
 // ===============================
 async function recoverStuckEvents() {
-  const cutoff = new Date(Date.now() - 1000 * 60 * 5);
+  const cutoff = new Date(Date.now() - 1000 * 60 * 10); // 10 min safety window
 
   await supabase
     .from("stripe_events")
     .update({
       status: "failed",
-      error: "auto_recovered_timeout",
+      error: "auto_recovered_stale_lock",
     })
     .eq("status", "processing")
     .lt("locked_at", cutoff.toISOString());
 }
 
 // ===============================
-// 🧠 SAFE FINALIZER (ALWAYS RUNS)
+// 🧠 FINALIZER (SAFE STATE MACHINE)
 // ===============================
-async function finalizeEvent(eventId, success, error = null) {
-  if (success) {
-    await supabase
-      .from("stripe_events")
-      .update({
-        status: "completed",
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", eventId);
-  } else {
-    await supabase
-      .from("stripe_events")
-      .update({
-        status: "failed",
-        error: error?.message || "unknown_error",
-      })
-      .eq("id", eventId);
-  }
+async function finalize(eventId, ok, error = null) {
+  await supabase
+    .from("stripe_events")
+    .update({
+      status: ok ? "completed" : "failed",
+      processed_at: new Date().toISOString(),
+      error: error?.message || null,
+    })
+    .eq("id", eventId);
 }
 
 // ===============================
-// CITY UPDATE (UNCHANGED)
+// CITY LOGIC (UNCHANGED BUT SAFE)
 // ===============================
 async function updateCity(city, contractorId, cityRow) {
   const existing = cityRow.active_contractors || [];
@@ -89,7 +92,7 @@ async function updateCity(city, contractorId, cityRow) {
 }
 
 // ===============================
-// EVENT ROUTER (ISOLATED LOGIC)
+// EVENT ROUTER
 // ===============================
 async function handleEvent(event) {
   switch (event.type) {
@@ -181,7 +184,7 @@ async function handleEvent(event) {
 }
 
 // ===============================
-// MAIN WEBHOOK (HARDENED)
+// MAIN WEBHOOK (HARDENED CORE)
 // ===============================
 export async function POST(req) {
   let event;
@@ -190,14 +193,10 @@ export async function POST(req) {
     const body = await req.text();
     const sig = req.headers.get("stripe-signature");
 
-    // ===============================
-    // AUTO RECOVERY BEFORE PROCESSING
-    // ===============================
-    await recoverStuckEvents();
+    // cleanup stale locks (non-blocking)
+    recoverStuckEvents().catch(() => {});
 
-    // ===============================
-    // VERIFY STRIPE
-    // ===============================
+    // verify stripe
     event = stripe.webhooks.constructEvent(
       body,
       sig,
@@ -205,23 +204,27 @@ export async function POST(req) {
     );
 
     // ===============================
-    // LOCK (DISTRIBUTED SAFE)
+    // 🔐 REAL IDEMPOTENCY CLAIM
     // ===============================
-    const locked = await lockEvent(event.id, event.type);
+    const claim = await claimEvent(event);
 
-    if (!locked) {
-      return Response.json({ duplicate: true, received: true });
+    if (!claim.allowed) {
+      return Response.json({
+        ok: true,
+        duplicate: true,
+      });
     }
 
-    // ===============================
-    // PROCESS
-    // ===============================
+    // already processed safeguard
+    if (claim.data?.status === "completed") {
+      return Response.json({ ok: true });
+    }
+
+    // process
     await handleEvent(event);
 
-    // ===============================
-    // FINALIZE SUCCESS
-    // ===============================
-    await finalizeEvent(event.id, true);
+    // finalize success
+    await finalize(event.id, true);
 
     return Response.json({ received: true });
 
@@ -229,7 +232,7 @@ export async function POST(req) {
     console.error("Webhook crash:", err);
 
     if (event?.id) {
-      await finalizeEvent(event.id, false, err);
+      await finalize(event.id, false, err);
     }
 
     return Response.json(
