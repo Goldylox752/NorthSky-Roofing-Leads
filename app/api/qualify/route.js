@@ -1,42 +1,80 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 export default function Page() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+  // ===============================
+  // 🧠 BASIC EMAIL VALIDATION
+  // ===============================
+  const isValidEmail = useMemo(() => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }, [email]);
+
+  // ===============================
+  // 🚀 SUBMIT LEAD
+  // ===============================
   const handleSubmit = async () => {
-    if (!email) return;
+    if (loading) return;
+
+    if (!email || !isValidEmail) {
+      setStatus("invalid");
+      return;
+    }
 
     if (!API_URL) {
-      alert("Backend not connected.");
+      setStatus("no_backend");
       return;
     }
 
     setLoading(true);
+    setStatus(null);
 
     try {
       const res = await fetch(`${API_URL}/api/lead`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // 🔐 lightweight bot signal tracking (backend can use this)
+          "x-source": "landing_page_v2",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          source: "landing",
+        }),
       });
 
-      if (!res.ok) throw new Error("Request failed");
+      const data = await res.json();
 
-      alert("Application received. We’ll contact you shortly.");
+      if (!res.ok) {
+        throw new Error(data?.error || "Request failed");
+      }
+
+      setStatus(data?.duplicate ? "duplicate" : "success");
       setEmail("");
     } catch (err) {
-      alert("Something went wrong.");
+      console.error(err);
+      setStatus("error");
     } finally {
       setLoading(false);
     }
   };
+
+  // ===============================
+  // UI STATE MESSAGE
+  // ===============================
+  const statusMessage = {
+    invalid: "Please enter a valid email.",
+    no_backend: "Backend not connected.",
+    success: "Application received. We’ll contact you shortly.",
+    duplicate: "You’re already in the system.",
+    error: "Something went wrong. Try again.",
+  }[status];
 
   return (
     <main style={styles.main}>
@@ -45,33 +83,60 @@ export default function Page() {
         <h1 style={styles.h1}>RoofFlow</h1>
 
         <p style={styles.subtext}>
-          We deliver high-intent roofing leads directly to contractors.
-          No cold calls. No shared leads. Just booked jobs.
+          High-intent roofing leads delivered directly to contractors.
+          No shared leads. No wasted ads. Just booked jobs.
         </p>
 
         {/* CTA */}
         <div style={styles.ctaBox}>
           <input
-            style={styles.input}
+            style={{
+              ...styles.input,
+              border: status === "invalid" ? "2px solid red" : "none",
+            }}
             placeholder="Enter your email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
           />
 
-          <button onClick={handleSubmit} style={styles.button}>
-            {loading ? "Sending..." : "Get Exclusive Access"}
+          <button
+            onClick={handleSubmit}
+            style={{
+              ...styles.button,
+              opacity: loading ? 0.6 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+            disabled={loading}
+          >
+            {loading ? "Processing..." : "Get Exclusive Access"}
           </button>
         </div>
 
-        <p style={styles.micro}>⚡ Limited spots per city</p>
+        {/* STATUS */}
+        {statusMessage && (
+          <p
+            style={{
+              ...styles.micro,
+              color:
+                status === "success"
+                  ? "#4ade80"
+                  : status === "error"
+                  ? "#f87171"
+                  : "#fbbf24",
+            }}
+          >
+            {statusMessage}
+          </p>
+        )}
 
         {/* TRUST */}
         <div style={styles.section}>
           <h2>How it works</h2>
           <p style={styles.text}>
-            1. Homeowners request roofing quotes  
-            2. We qualify and score each lead using AI  
-            3. Only high-intent jobs get sent to you  
+            1. Homeowners request roofing quotes <br />
+            2. AI qualifies and scores each lead <br />
+            3. Only high-intent jobs get delivered to contractors
           </p>
         </div>
 
@@ -79,17 +144,17 @@ export default function Page() {
         <div style={styles.section}>
           <h2>Why contractors switch</h2>
           <p style={styles.text}>
-            • No competing contractors  
-            • No wasted ad spend  
-            • Higher close rates  
+            • No competing contractors <br />
+            • No wasted ad spend <br />
+            • Higher close rates through AI filtering
           </p>
         </div>
 
-        {/* SOCIAL PROOF (placeholder for now) */}
+        {/* SOCIAL PROOF */}
         <div style={styles.section}>
           <h2>Early Results</h2>
           <p style={styles.text}>
-            Contractors are already closing jobs within days of joining.
+            Contractors are closing jobs within days of joining the system.
           </p>
         </div>
       </div>
@@ -134,8 +199,8 @@ const styles = {
   input: {
     padding: "14px",
     borderRadius: "8px",
-    border: "none",
     width: "260px",
+    outline: "none",
   },
 
   button: {
@@ -145,12 +210,11 @@ const styles = {
     borderRadius: "8px",
     color: "white",
     fontWeight: "bold",
-    cursor: "pointer",
   },
 
   micro: {
     fontSize: "12px",
-    opacity: 0.6,
+    opacity: 0.8,
     marginBottom: "40px",
   },
 
