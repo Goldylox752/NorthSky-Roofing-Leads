@@ -4,45 +4,78 @@ const cors = require("cors");
 const app = express();
 
 // =====================
-// MIDDLEWARE (IMPORTANT)
+// CONFIG
+// =====================
+const PORT = process.env.PORT || 3001;
+
+// =====================
+// MIDDLEWARE
 // =====================
 app.use(cors({
-  origin: "*", // tighten later to your frontend domain
+  origin: "*", // lock this later to your frontend domain
   methods: ["GET", "POST"],
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 // =====================
-// HEALTH CHECK (fixes "Not Found" confusion)
+// REQUEST LOGGER (DEBUGGING)
 // =====================
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
 });
 
 // =====================
-// LEADS ENDPOINT (FRONTEND SAFE)
+// HEALTH CHECK (RENDER + FRONTEND TEST)
+// =====================
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+  });
+});
+
+// =====================
+// LEAD VALIDATION
+// =====================
+function validateLead(body) {
+  const { email, phone } = body;
+
+  if (!email && !phone) {
+    return "Email or phone required";
+  }
+
+  if (phone && phone.length < 7) {
+    return "Invalid phone number";
+  }
+
+  return null;
+}
+
+// =====================
+// LEADS ENDPOINT (PRODUCTION SAFE)
 // =====================
 app.post("/api/leads", async (req, res) => {
   try {
-    const { name, email, phone, city } = req.body;
+    const error = validateLead(req.body);
 
-    // =====================
-    // VALIDATION
-    // =====================
-    if (!email && !phone) {
+    if (error) {
       return res.status(400).json({
         success: false,
-        error: "Email or phone required",
+        error,
       });
     }
 
-    // =====================
-    // SIMULATED PROCESSING
-    // =====================
-    const leadId = "lead_" + Date.now();
+    const { name, email, phone, city } = req.body;
 
-    console.log("Lead received:", {
+    // =====================
+    // SIMULATED LEAD CREATION
+    // =====================
+    const leadId = `lead_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    console.log("📩 Lead received:", {
       leadId,
       name,
       email,
@@ -51,10 +84,11 @@ app.post("/api/leads", async (req, res) => {
     });
 
     // =====================
-    // RESPONSE (FRONTEND EXPECTS THIS FORMAT)
+    // RESPONSE CONTRACT (IMPORTANT FOR FRONTEND)
     // =====================
     return res.status(200).json({
       success: true,
+      message: "Lead created successfully",
       lead: {
         id: leadId,
         name: name || null,
@@ -62,11 +96,12 @@ app.post("/api/leads", async (req, res) => {
         phone: phone || null,
         city: city || null,
         status: "queued",
+        createdAt: new Date().toISOString(),
       },
     });
 
   } catch (err) {
-    console.error("Lead error:", err);
+    console.error("🔥 Lead error:", err);
 
     return res.status(500).json({
       success: false,
@@ -76,22 +111,30 @@ app.post("/api/leads", async (req, res) => {
 });
 
 // =====================
-// GLOBAL ERROR SAFETY
+// 404 HANDLER (IMPORTANT)
+// =====================
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Route not found",
+  });
+});
+
+// =====================
+// GLOBAL ERROR HANDLER
 // =====================
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
+  console.error("💥 Unhandled error:", err);
 
   res.status(500).json({
     success: false,
-    error: "Server crash protected",
+    error: "Server crashed safely",
   });
 });
 
 // =====================
 // START SERVER
 // =====================
-const PORT = process.env.PORT || 3001;
-
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
