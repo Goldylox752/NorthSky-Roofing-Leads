@@ -1,11 +1,11 @@
 import {
-  getQueuedLeads,
   markLeadProcessing,
   markLeadDone,
   markLeadFailed,
 } from "@/lib/queueLead";
 
 import { aiScoreLead } from "@/lib/aiScoreLead";
+import { supabase } from "@/lib/supabase";
 
 // =====================
 // CONFIG
@@ -14,13 +14,30 @@ const CONCURRENCY = 5;
 const MAX_RETRIES = 3;
 const BATCH_SIZE = 20;
 
-// Worker identity (multi-instance safe)
 const WORKER_ID =
   process.env.WORKER_ID ||
   `worker_${Math.random().toString(36).slice(2, 8)}`;
 
 // =====================
-// PROCESS SINGLE LEAD
+// 🔐 ATOMIC CLAIM (CRITICAL FIX)
+// =====================
+// This replaces getQueuedLeads completely
+async function claimLeads() {
+  const { data, error } = await supabase.rpc("claim_leads", {
+    worker_id: WORKER_ID,
+    batch_size: BATCH_SIZE,
+  });
+
+  if (error) {
+    console.error("Claim error:", error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+// =====================
+// PROCESS LEAD
 // =====================
 async function processLead(lead) {
   if (!lead?.id) {
@@ -28,18 +45,18 @@ async function processLead(lead) {
   }
 
   try {
-    // 🔒 HARD ATOMIC LOCK (CRITICAL)
+    // already locked by RPC, but double-safe guard
     const locked = await markLeadProcessing(lead.id, WORKER_ID);
 
     if (!locked) {
       return { ok: false, id: lead.id, reason: "Already claimed" };
     }
 
-    // 🤖 AI PROCESSING
+    // 🤖 AI SCORING
     const scored = await aiScoreLead(lead);
 
     if (!scored) {
-      throw new Error("AI failed to score lead");
+      throw new Error("AI failed scoring");
     }
 
     // ✅ COMMIT SUCCESS
@@ -47,7 +64,7 @@ async function processLead(lead) {
 
     return { ok: true, id: lead.id };
   } catch (err) {
-    console.error(`[${WORKER_ID}] failed lead ${lead.id}`, err.message);
+    console.error(`[${WORKER_ID}] lead failed`, lead.id, err.message);
 
     await markLeadFailed(
       lead.id,
@@ -61,26 +78,24 @@ async function processLead(lead) {
 }
 
 // =====================
-// SAFE CONCURRENT WORKER
+// SAFE PARALLEL EXECUTION
 // =====================
 async function runWorker(leads) {
   const results = [];
-
-  // simple pointer-based concurrency (more stable than Promise race map)
   let index = 0;
 
   async function worker() {
-    while (index < leads.length) {
-      const current = leads[index++];
+    while (true) {
+      const i = index++;
+      if (i >= leads.length) break;
 
-      if (!current) break;
+      const lead = leads[i];
+      const res = await processLead(lead);
 
-      const res = await processLead(current);
       results.push(res);
     }
   }
 
-  // spawn fixed workers
   const workers = Array.from(
     { length: Math.min(CONCURRENCY, leads.length) },
     () => worker()
@@ -92,16 +107,16 @@ async function runWorker(leads) {
 }
 
 // =====================
-// MAIN ENTRY (CRON)
+// MAIN ENTRY
 // =====================
 export async function GET() {
   const start = Date.now();
 
   try {
-    // 🧠 batch fetch (prevents memory spike)
-    const leads = await getQueuedLeads(BATCH_SIZE);
+    // 🔥 ATOMIC CLAIM (NO RACE CONDITIONS EVER)
+    const leads = await claimLeads();
 
-    if (!leads?.length) {
+    if (!leads.length) {
       return Response.json({
         ok: true,
         worker: WORKER_ID,
@@ -111,7 +126,7 @@ export async function GET() {
     }
 
     console.log(
-      `🚀 [${WORKER_ID}] processing ${leads.length} leads`
+      `🚀 [${WORKER_ID}] claimed ${leads.length} leads`
     );
 
     const results = await runWorker(leads);
@@ -122,7 +137,7 @@ export async function GET() {
     const duration = Date.now() - start;
 
     console.log(
-      `✅ [${WORKER_ID}] done: ${processed}/${leads.length} (${duration}ms)`
+      `✅ [${WORKER_ID}] done ${processed}/${leads.length} (${duration}ms)`
     );
 
     return Response.json({
@@ -134,7 +149,7 @@ export async function GET() {
       duration_ms: duration,
     });
   } catch (err) {
-    console.error(`❌ Worker crash:`, err);
+    console.error("❌ Worker crash:", err);
 
     return Response.json(
       {
