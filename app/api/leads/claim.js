@@ -6,58 +6,83 @@ export async function POST(req) {
 
     if (!leadId || !contractorId) {
       return Response.json(
-        { error: "Missing data" },
+        { success: false, error: "Missing data" },
         { status: 400 }
       );
     }
 
     const now = new Date();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const nowIso = now.toISOString();
+    const expiresAtIso = new Date(
+      Date.now() + 5 * 60 * 1000
+    ).toISOString();
 
     // ===============================
-    // 🔐 ATOMIC CLAIM (FULL LOCK SAFETY)
+    // STEP 1: FETCH CURRENT STATE (SAFE CHECK)
     // ===============================
-    const { data, error } = await supabase
+    const { data: lead, error: fetchError } = await supabase
       .from("leads")
-      .update({
-        status: "assigned",
-        assigned_contractor_id: contractorId,
-
-        // 🔒 locking system
-        lock_owner: contractorId,
-        locked_at: now.toISOString(),
-        lock_expires_at: expiresAt.toISOString(),
-      })
+      .select("id, status, lock_expires_at")
       .eq("id", leadId)
+      .maybeSingle();
 
-      // 🧠 critical: only allow claim if:
-      // - still new OR
-      // - lock expired
-      .or(
-        `status.eq.new,and(lock_expires_at.lt.${now.toISOString()})`
-      )
-      .select()
-      .single();
+    if (fetchError || !lead) {
+      return Response.json(
+        { success: false, error: "Lead not found" },
+        { status: 404 }
+      );
+    }
 
     // ===============================
-    // 🚫 FAIL SAFE (already taken)
+    // STEP 2: CHECK IF CLAIMABLE (LOGIC LAYER)
     // ===============================
-    if (error || !data) {
+    const isLocked =
+      lead.status === "assigned" &&
+      lead.lock_expires_at &&
+      new Date(lead.lock_expires_at) > now;
+
+    if (lead.status === "assigned" && isLocked) {
       return Response.json(
         {
           success: false,
-          error: "Lead already claimed or locked",
+          error: "Lead already claimed",
         },
         { status: 409 }
       );
     }
 
     // ===============================
-    // SUCCESS
+    // STEP 3: CLAIM LEAD (SAFE UPDATE)
+    // ===============================
+    const { data: updated, error: updateError } = await supabase
+      .from("leads")
+      .update({
+        status: "assigned",
+        assigned_contractor_id: contractorId,
+        lock_owner: contractorId,
+        locked_at: nowIso,
+        lock_expires_at: expiresAtIso,
+      })
+      .eq("id", leadId)
+      .select()
+      .single();
+
+    if (updateError || !updated) {
+      return Response.json(
+        {
+          success: false,
+          error: "Failed to claim lead",
+        },
+        { status: 500 }
+      );
+    }
+
+    // ===============================
+    // SUCCESS RESPONSE (FRONTEND SAFE)
     // ===============================
     return Response.json({
       success: true,
-      lead: data,
+      lead: updated,
       lockedBy: contractorId,
     });
 
@@ -65,7 +90,10 @@ export async function POST(req) {
     console.error("Lead claim error:", err);
 
     return Response.json(
-      { error: "Server error" },
+      {
+        success: false,
+        error: "Server error",
+      },
       { status: 500 }
     );
   }
