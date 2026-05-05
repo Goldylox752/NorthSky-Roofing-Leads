@@ -17,20 +17,23 @@ const PLANS = {
 };
 
 // ===============================
-// 🔐 IDEMPOTENCY KEY (SAFE + TIME-BUCKETED)
+// 🔐 DISTRIBUTED IDEMPOTENCY KEY (IMPROVED)
 // ===============================
 function buildLockId(email, plan) {
-  // prevents permanent lock failures + reduces spam abuse
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-  return `${email}:${plan}:${hourBucket}`;
+  const hour = Math.floor(Date.now() / (1000 * 60 * 60));
+  const day = Math.floor(hour / 24);
+
+  // prevents abuse + allows retry recovery
+  return `checkout:${email}:${plan}:${day}`;
 }
 
 // ===============================
-// 🧠 ATOMIC LOCK (RACE SAFE)
+// 🧠 ATOMIC LOCK (RACE SAFE + REPLAY SAFE)
 // ===============================
-async function acquireLock(lockId) {
+async function acquireLock(lockId, email) {
   const { error } = await supabase.from("checkout_locks").insert({
     id: lockId,
+    email,
     created_at: new Date().toISOString(),
   });
 
@@ -38,13 +41,33 @@ async function acquireLock(lockId) {
 }
 
 // ===============================
-// 🧹 OPTIONAL: CLEANUP OLD LOCKS (prevents table bloat)
+// 🧹 SAFE CLEANUP (NON-BLOCKING)
 // ===============================
 async function cleanupOldLocks() {
   await supabase
     .from("checkout_locks")
     .delete()
-    .lt("created_at", new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString());
+    .lt(
+      "created_at",
+      new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString()
+    );
+}
+
+// ===============================
+// 🛡️ BASIC ABUSE GUARD (LIGHTWEIGHT BOT FILTER)
+// ===============================
+async function abuseCheck(email) {
+  const { data } = await supabase
+    .from("checkout_locks")
+    .select("id")
+    .eq("email", email)
+    .gte(
+      "created_at",
+      new Date(Date.now() - 1000 * 60 * 10).toISOString()
+    );
+
+  // too many attempts in 10 min = blocked
+  return (data?.length || 0) < 5;
 }
 
 // ===============================
@@ -74,21 +97,33 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 🔐 IDEMPOTENCY LOCK (STRONGER)
+    // 🛡️ ABUSE PROTECTION LAYER
     // ===============================
-    const lockId = buildLockId(email, plan);
+    const allowed = await abuseCheck(email);
 
-    const locked = await acquireLock(lockId);
-
-    if (!locked) {
+    if (!allowed) {
       return Response.json(
-        { error: "Duplicate checkout blocked" },
+        { error: "Too many attempts. Try later." },
         { status: 429 }
       );
     }
 
     // ===============================
-    // CREATE STRIPE SESSION
+    // 🔐 IDEMPOTENCY LOCK
+    // ===============================
+    const lockId = buildLockId(email, plan);
+
+    const locked = await acquireLock(lockId, email);
+
+    if (!locked) {
+      return Response.json(
+        { error: "Duplicate checkout blocked" },
+        { status: 409 }
+      );
+    }
+
+    // ===============================
+    // 💳 STRIPE SESSION CREATION
     // ===============================
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -112,18 +147,18 @@ export async function POST(req) {
       cancel_url: `${process.env.FRONTEND_URL}/cancel`,
 
       // ===============================
-      // 🔗 WEBHOOK CORRELATION (CRITICAL)
+      // 🔗 STRIPE WEBHOOK CORRELATION
       // ===============================
       metadata: {
         plan,
         email,
         lock_id: lockId,
-        source: "roofflow_checkout_v2",
+        source: "roofflow_checkout_v3",
       },
     });
 
     // ===============================
-    // AUDIT EVENT (NON-CRITICAL)
+    // 📊 AUDIT LOG (NON-CRITICAL)
     // ===============================
     await supabase.from("events").insert({
       type: "checkout.created",
@@ -134,7 +169,7 @@ export async function POST(req) {
     });
 
     // ===============================
-    // BACKGROUND CLEANUP (optional safe call)
+    // BACKGROUND MAINTENANCE (NON-BLOCKING)
     // ===============================
     cleanupOldLocks().catch(() => {});
 
