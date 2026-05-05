@@ -11,11 +11,13 @@ function buildDedupeKey(email, phone, city) {
 }
 
 function safeScore(email, phone, city) {
-  let score = 5;
-  if (email) score += 1;
-  if (phone) score += 2;
-  if (city) score += 1;
-  return Math.min(score, 10);
+  return Math.min(
+    10,
+    5 +
+      (email ? 1 : 0) +
+      (phone ? 2 : 0) +
+      (city ? 1 : 0)
+  );
 }
 
 // ===============================
@@ -42,11 +44,11 @@ export async function POST(req) {
     const score = safeScore(email, phone, city);
 
     // ===============================
-    // 1. HARD IDEMPOTENCY CHECK (DB SOURCE OF TRUTH)
+    // 1. IDEMPOTENCY CHECK
     // ===============================
     const { data: existing } = await supabase
       .from("leads")
-      .select("id, status, assigned_contractor_id, price")
+      .select("*")
       .eq("dedupe_key", dedupeKey)
       .maybeSingle();
 
@@ -59,29 +61,26 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 2. CREATE LEAD (UNASSIGNED STATE ONLY)
+    // 2. CREATE LEAD
     // ===============================
-    const { data: lead, error: createError } = await supabase
+    const { data: lead, error } = await supabase
       .from("leads")
       .insert({
         email,
         phone,
         name,
-        city: city || null,
+        city: city || "unknown",
         source: source || "direct",
-
         dedupe_key: dedupeKey,
         score,
-
         status: "new",
         price: 0,
-
         created_at: new Date().toISOString(),
       })
       .select()
       .single();
 
-    if (createError || !lead) {
+    if (error || !lead) {
       return Response.json(
         { error: "Lead creation failed" },
         { status: 500 }
@@ -89,9 +88,15 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 3. ROUTING ENGINE (DECISION LAYER)
+    // 3. ROUTING
     // ===============================
-    const assignment = await routeLead(lead);
+    let assignment;
+    try {
+      assignment = await routeLead(lead);
+    } catch (err) {
+      console.error("Routing failed:", err);
+      assignment = null;
+    }
 
     if (!assignment?.contractorId) {
       await supabase.from("events").insert({
@@ -107,31 +112,32 @@ export async function POST(req) {
       });
     }
 
+    // ===============================
+    // 4. PRICE CALC
+    // ===============================
     const price = calculatePrice(
       score,
       assignment.cityTier || "basic"
     );
 
     // ===============================
-    // 4. ATOMIC CLAIM (CRITICAL RACE PROTECTION)
+    // 5. ATOMIC UPDATE (SAFE LOCK)
     // ===============================
-    const { data: claimed, error: claimError } = await supabase
+    const { data: claimed } = await supabase
       .from("leads")
       .update({
         status: "assigned",
         assigned_contractor_id: assignment.contractorId,
-
         lock_owner: assignment.contractorId,
         locked_at: new Date().toISOString(),
-
         price,
       })
       .eq("id", lead.id)
-      .eq("status", "new") // 🔥 prevents double claim
+      .eq("status", "new")
       .select()
-      .single();
+      .maybeSingle();
 
-    if (claimError || !claimed) {
+    if (!claimed) {
       return Response.json(
         { error: "LEAD_ALREADY_CLAIMED" },
         { status: 409 }
@@ -139,17 +145,19 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 5. EVENT LOG (NON-BLOCKING)
+    // 6. EVENT LOG (NON-BLOCKING)
     // ===============================
-    supabase.from("events").insert({
-      lead_id: lead.id,
-      type: "assigned",
-      payload: {
-        contractorId: assignment.contractorId,
-        price,
-        city,
-      },
-    }).catch(() => {});
+    supabase
+      .from("events")
+      .insert({
+        lead_id: lead.id,
+        type: "assigned",
+        payload: {
+          contractorId: assignment.contractorId,
+          price,
+        },
+      })
+      .catch(() => {});
 
     // ===============================
     // RESPONSE
@@ -158,11 +166,7 @@ export async function POST(req) {
       success: true,
       routed: true,
       lead: claimed,
-      assignment: {
-        contractorId: assignment.contractorId,
-        price,
-        city,
-      },
+      assignment,
       latency_ms: Date.now() - start,
     });
 
