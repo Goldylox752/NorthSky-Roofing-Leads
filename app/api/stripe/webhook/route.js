@@ -13,34 +13,48 @@ const supabase = createClient(
 );
 
 // ===============================
-// ATOMIC IDEMPOTENCY CHECK (SAFE)
+// 🔐 ATOMIC IDEMPOTENCY LOCK (BEST PRACTICE)
 // ===============================
-async function isProcessed(eventId) {
-  const { data } = await supabase
-    .from("stripe_events")
-    .select("id")
-    .eq("id", eventId)
-    .maybeSingle();
-
-  return !!data;
-}
-
-// ===============================
-// MARK EVENT (ATOMIC INSERT)
-// ===============================
-async function markProcessed(eventId, type) {
+async function lockEvent(eventId, type) {
   const { error } = await supabase.from("stripe_events").insert({
     id: eventId,
     type,
-    processed_at: new Date().toISOString(),
+    status: "processing",
+    created_at: new Date().toISOString(),
   });
 
-  // duplicate insert = already processed
+  // if duplicate key → already processed or locked
   return !error;
 }
 
 // ===============================
-// SAFE CITY UPDATE (NO RACE OVERWRITE)
+// MARK SUCCESS
+// ===============================
+async function markSuccess(eventId) {
+  await supabase
+    .from("stripe_events")
+    .update({
+      status: "completed",
+      processed_at: new Date().toISOString(),
+    })
+    .eq("id", eventId);
+}
+
+// ===============================
+// MARK FAILURE (FOR RETRIES)
+// ===============================
+async function markFailed(eventId, error) {
+  await supabase
+    .from("stripe_events")
+    .update({
+      status: "failed",
+      error: error?.message || "unknown error",
+    })
+    .eq("id", eventId);
+}
+
+// ===============================
+// SAFE CITY UPDATE (UNCHANGED BUT CLEANED)
 // ===============================
 async function updateCity(city, contractorId, cityRow) {
   const existing = cityRow.active_contractors || [];
@@ -65,31 +79,27 @@ async function updateCity(city, contractorId, cityRow) {
 // WEBHOOK
 // ===============================
 export async function POST(req) {
+  let event;
+
   try {
     const body = await req.text();
     const sig = req.headers.get("stripe-signature");
 
-    let event;
-
     // ===============================
     // VERIFY STRIPE SIGNATURE
     // ===============================
-    try {
-      event = stripe.webhooks.constructEvent(
-        body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      return new Response("Invalid signature", { status: 400 });
-    }
+    event = stripe.webhooks.constructEvent(
+      body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
 
     // ===============================
-    // IDEMPOTENCY GUARD (FAST EXIT)
+    // 🔐 HARD IDEMPOTENCY LOCK FIRST (CRITICAL FIX)
     // ===============================
-    const already = await isProcessed(event.id);
+    const locked = await lockEvent(event.id, event.type);
 
-    if (already) {
+    if (!locked) {
       return Response.json({
         received: true,
         duplicate: true,
@@ -102,7 +112,7 @@ export async function POST(req) {
     switch (event.type) {
 
       // =====================================================
-      // 💳 PAYMENT SUCCESS
+      // CHECKOUT COMPLETE
       // =====================================================
       case "checkout.session.completed": {
         const session = event.data.object;
@@ -114,9 +124,6 @@ export async function POST(req) {
 
         if (!email) break;
 
-        // ===============================
-        // UPSERT CONTRACTOR (SAFE)
-        // ===============================
         const { data: contractor, error } = await supabase
           .from("contractors")
           .upsert(
@@ -134,13 +141,9 @@ export async function POST(req) {
           .single();
 
         if (error || !contractor) {
-          console.error("Contractor upsert failed:", error);
-          break;
+          throw new Error("Contractor upsert failed");
         }
 
-        // ===============================
-        // CITY LOGIC (SAFE + OPTIONAL)
-        // ===============================
         if (city) {
           const { data: cityRow } = await supabase
             .from("cities")
@@ -159,9 +162,6 @@ export async function POST(req) {
             .eq("contractorId", contractor.id);
         }
 
-        // ===============================
-        // AUDIT LOG (IMPORTANT FOR DEBUGGING)
-        // ===============================
         await supabase.from("events").insert({
           type: "stripe.checkout.completed",
           contractor_id: contractor.id,
@@ -172,7 +172,7 @@ export async function POST(req) {
       }
 
       // =====================================================
-      // 🔄 SUBSCRIPTION UPDATE
+      // SUBSCRIPTION UPDATED
       // =====================================================
       case "customer.subscription.updated": {
         const sub = event.data.object;
@@ -188,7 +188,7 @@ export async function POST(req) {
       }
 
       // =====================================================
-      // ❌ SUBSCRIPTION CANCELLED
+      // SUBSCRIPTION DELETED
       // =====================================================
       case "customer.subscription.deleted": {
         const sub = event.data.object;
@@ -209,14 +209,21 @@ export async function POST(req) {
     }
 
     // ===============================
-    // MARK PROCESSED (FINAL STEP)
+    // MARK SUCCESS (ONLY AFTER FULL EXECUTION)
     // ===============================
-    await markProcessed(event.id, event.type);
+    await markSuccess(event.id);
 
     return Response.json({ received: true });
 
   } catch (err) {
     console.error("Webhook crash:", err);
+
+    // ===============================
+    // SAFE FAILURE MARKING
+    // ===============================
+    if (event?.id) {
+      await markFailed(event.id, err);
+    }
 
     return Response.json(
       { error: "Webhook failed" },
