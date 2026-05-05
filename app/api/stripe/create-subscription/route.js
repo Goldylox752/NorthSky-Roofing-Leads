@@ -17,17 +17,34 @@ const PLANS = {
 };
 
 // ===============================
-// SIMPLE RATE GUARD (DB-BASED IDEMPOTENCY)
+// 🔐 IDEMPOTENCY KEY (SAFE + TIME-BUCKETED)
 // ===============================
-async function createCheckoutLock(email, plan) {
-  const key = `${email}-${plan}`;
+function buildLockId(email, plan) {
+  // prevents permanent lock failures + reduces spam abuse
+  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+  return `${email}:${plan}:${hourBucket}`;
+}
 
+// ===============================
+// 🧠 ATOMIC LOCK (RACE SAFE)
+// ===============================
+async function acquireLock(lockId) {
   const { error } = await supabase.from("checkout_locks").insert({
-    id: key,
+    id: lockId,
     created_at: new Date().toISOString(),
   });
 
   return !error;
+}
+
+// ===============================
+// 🧹 OPTIONAL: CLEANUP OLD LOCKS (prevents table bloat)
+// ===============================
+async function cleanupOldLocks() {
+  await supabase
+    .from("checkout_locks")
+    .delete()
+    .lt("created_at", new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString());
 }
 
 // ===============================
@@ -38,7 +55,7 @@ export async function POST(req) {
     const { plan, email } = await req.json();
 
     // ===============================
-    // VALIDATION HARDENING
+    // VALIDATION
     // ===============================
     if (!plan || !email) {
       return Response.json(
@@ -57,24 +74,25 @@ export async function POST(req) {
     }
 
     // ===============================
-    // IDEMPOTENCY / ANTI-SPAM LAYER
+    // 🔐 IDEMPOTENCY LOCK (STRONGER)
     // ===============================
-    const allowed = await createCheckoutLock(email, plan);
+    const lockId = buildLockId(email, plan);
 
-    if (!allowed) {
+    const locked = await acquireLock(lockId);
+
+    if (!locked) {
       return Response.json(
-        { error: "Duplicate checkout attempt blocked" },
+        { error: "Duplicate checkout blocked" },
         { status: 429 }
       );
     }
 
     // ===============================
-    // CREATE CHECKOUT SESSION
+    // CREATE STRIPE SESSION
     // ===============================
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-
       customer_email: email,
 
       line_items: [
@@ -94,24 +112,31 @@ export async function POST(req) {
       cancel_url: `${process.env.FRONTEND_URL}/cancel`,
 
       // ===============================
-      // CRITICAL: webhook correlation
+      // 🔗 WEBHOOK CORRELATION (CRITICAL)
       // ===============================
       metadata: {
         plan,
         email,
-        source: "roofflow_checkout",
+        lock_id: lockId,
+        source: "roofflow_checkout_v2",
       },
     });
 
     // ===============================
-    // AUDIT LOG
+    // AUDIT EVENT (NON-CRITICAL)
     // ===============================
     await supabase.from("events").insert({
       type: "checkout.created",
       email,
       plan,
       stripe_session_id: session.id,
+      lock_id: lockId,
     });
+
+    // ===============================
+    // BACKGROUND CLEANUP (optional safe call)
+    // ===============================
+    cleanupOldLocks().catch(() => {});
 
     return Response.json({
       url: session.url,
