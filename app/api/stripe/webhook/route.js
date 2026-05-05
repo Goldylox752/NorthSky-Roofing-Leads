@@ -3,9 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20",
-});
+// ===============================
+// INIT
+// ===============================
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -13,56 +14,44 @@ const supabase = createClient(
 );
 
 // ===============================
-// 🔐 ATOMIC EVENT CLAIM (REAL LOCK)
+// 🔐 IDEMPOTENCY CHECK (FIXED)
 // ===============================
-async function claimEvent(event) {
-  const { data, error } = await supabase
+async function getEvent(eventId) {
+  const { data } = await supabase
     .from("stripe_events")
-    .upsert(
-      {
-        id: event.id,
-        type: event.type,
-        status: "processing",
-        updated_at: new Date().toISOString(),
-        locked_at: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    )
-    .select()
-    .single();
+    .select("id, status")
+    .eq("id", eventId)
+    .maybeSingle();
 
-  // if already completed → skip completely
-  if (data?.status === "completed") {
-    return { allowed: false, reason: "already_processed" };
+  return data;
+}
+
+async function createEventLock(event) {
+  const { error } = await supabase
+    .from("stripe_events")
+    .insert({
+      id: event.id,
+      type: event.type,
+      status: "processing",
+      locked_at: new Date().toISOString(),
+    });
+
+  // if already exists → treat as duplicate safely
+  if (error && error.code === "23505") {
+    return { duplicate: true };
   }
 
-  return { allowed: !error, data };
+  return { duplicate: false };
 }
 
 // ===============================
-// 🧹 SAFE RECOVERY (ONLY STALE LOCKS)
+// FINALIZE STATE
 // ===============================
-async function recoverStuckEvents() {
-  const cutoff = new Date(Date.now() - 1000 * 60 * 10); // 10 min safety window
-
+async function finalize(eventId, status, error = null) {
   await supabase
     .from("stripe_events")
     .update({
-      status: "failed",
-      error: "auto_recovered_stale_lock",
-    })
-    .eq("status", "processing")
-    .lt("locked_at", cutoff.toISOString());
-}
-
-// ===============================
-// 🧠 FINALIZER (SAFE STATE MACHINE)
-// ===============================
-async function finalize(eventId, ok, error = null) {
-  await supabase
-    .from("stripe_events")
-    .update({
-      status: ok ? "completed" : "failed",
+      status,
       processed_at: new Date().toISOString(),
       error: error?.message || null,
     })
@@ -70,33 +59,14 @@ async function finalize(eventId, ok, error = null) {
 }
 
 // ===============================
-// CITY LOGIC (UNCHANGED BUT SAFE)
-// ===============================
-async function updateCity(city, contractorId, cityRow) {
-  const existing = cityRow.active_contractors || [];
-
-  if (existing.includes(contractorId)) return;
-
-  const updated = [...existing, contractorId];
-
-  await supabase
-    .from("cities")
-    .update({
-      active_contractors: updated,
-      status:
-        updated.length >= cityRow.max_contractors
-          ? "sold"
-          : "active",
-    })
-    .eq("city", city);
-}
-
-// ===============================
-// EVENT ROUTER
+// STRIPE EVENT HANDLER
 // ===============================
 async function handleEvent(event) {
   switch (event.type) {
 
+    // ===============================
+    // PAYMENT SUCCESS
+    // ===============================
     case "checkout.session.completed": {
       const session = event.data.object;
 
@@ -123,28 +93,9 @@ async function handleEvent(event) {
         .select()
         .single();
 
-      if (error || !contractor) {
-        throw new Error("Contractor upsert failed");
-      }
+      if (error) throw error;
 
-      if (city) {
-        const { data: cityRow } = await supabase
-          .from("cities")
-          .select("*")
-          .eq("city", city)
-          .single();
-
-        if (cityRow) {
-          await updateCity(city, contractor.id, cityRow);
-        }
-
-        await supabase
-          .from("city_intents")
-          .update({ status: "confirmed" })
-          .eq("city", city)
-          .eq("contractorId", contractor.id);
-      }
-
+      // log event (lightweight)
       await supabase.from("events").insert({
         type: "stripe.checkout.completed",
         contractor_id: contractor.id,
@@ -154,6 +105,9 @@ async function handleEvent(event) {
       break;
     }
 
+    // ===============================
+    // SUB UPDATED
+    // ===============================
     case "customer.subscription.updated": {
       const sub = event.data.object;
 
@@ -167,6 +121,9 @@ async function handleEvent(event) {
       break;
     }
 
+    // ===============================
+    // SUB DELETED
+    // ===============================
     case "customer.subscription.deleted": {
       const sub = event.data.object;
 
@@ -184,7 +141,7 @@ async function handleEvent(event) {
 }
 
 // ===============================
-// MAIN WEBHOOK (HARDENED CORE)
+// MAIN WEBHOOK
 // ===============================
 export async function POST(req) {
   let event;
@@ -193,10 +150,7 @@ export async function POST(req) {
     const body = await req.text();
     const sig = req.headers.get("stripe-signature");
 
-    // cleanup stale locks (non-blocking)
-    recoverStuckEvents().catch(() => {});
-
-    // verify stripe
+    // verify stripe signature
     event = stripe.webhooks.constructEvent(
       body,
       sig,
@@ -204,35 +158,34 @@ export async function POST(req) {
     );
 
     // ===============================
-    // 🔐 REAL IDEMPOTENCY CLAIM
+    // IDEMPOTENCY GUARD (CLEAN VERSION)
     // ===============================
-    const claim = await claimEvent(event);
+    const existing = await getEvent(event.id);
 
-    if (!claim.allowed) {
-      return Response.json({
-        ok: true,
-        duplicate: true,
-      });
+    if (existing?.status === "completed") {
+      return Response.json({ ok: true, duplicate: true });
     }
 
-    // already processed safeguard
-    if (claim.data?.status === "completed") {
-      return Response.json({ ok: true });
+    const lock = await createEventLock(event);
+
+    if (lock.duplicate) {
+      return Response.json({ ok: true, duplicate: true });
     }
 
-    // process
+    // ===============================
+    // PROCESS EVENT
+    // ===============================
     await handleEvent(event);
 
-    // finalize success
-    await finalize(event.id, true);
+    await finalize(event.id, "completed");
 
     return Response.json({ received: true });
 
   } catch (err) {
-    console.error("Webhook crash:", err);
+    console.error("❌ Stripe webhook error:", err);
 
     if (event?.id) {
-      await finalize(event.id, false, err);
+      await finalize(event.id, "failed", err);
     }
 
     return Response.json(
