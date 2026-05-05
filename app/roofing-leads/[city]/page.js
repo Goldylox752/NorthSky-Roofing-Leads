@@ -1,84 +1,100 @@
 import Link from "next/link";
 
+function formatCity(slug = "") {
+  return slug
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
 export async function generateMetadata({ params }) {
-  const city = params.city.replace(/-/g, " ");
+  const city = formatCity(params.city);
 
   return {
-    title: `Roofing Leads in ${city} | RoofFlow Exclusive Contractor Appointments`,
-    description: `Get exclusive roofing leads in ${city}. RoofFlow connects contractors with high-intent homeowners actively requesting roofing estimates.`,
+    title: `Exclusive Roofing Leads in ${city} | RoofFlow`,
+    description: `Get exclusive, high-intent roofing leads in ${city}. RoofFlow connects contractors with homeowners actively requesting estimates.`,
+    openGraph: {
+      title: `Roofing Leads in ${city}`,
+      description: `Exclusive contractor-only roofing leads in ${city}.`,
+      type: "website",
+    },
   };
 }
 
 export default function CityPage({ params }) {
-  const city = params.city.replace(/-/g, " ");
+  const city = formatCity(params.city);
 
   return (
     <main style={styles.main}>
       <div style={styles.container}>
 
         {/* HERO */}
-        <h1 style={styles.h1}>
-          Exclusive Roofing Leads in {city}
-        </h1>
+        <header style={styles.hero}>
+          <h1 style={styles.h1}>
+            Exclusive Roofing Leads in {city}
+          </h1>
 
-        <p style={styles.subtext}>
-          RoofFlow delivers high-intent homeowners in {city} directly to contractors.
-          No shared lists. No cold traffic. Just booked opportunities.
-        </p>
+          <p style={styles.subtext}>
+            RoofFlow delivers <b>high-intent homeowners</b> in {city} directly to contractors.
+            No shared lists. No recycled data. Only real booking opportunities.
+          </p>
 
-        {/* CTA */}
-        <div style={styles.ctaBox}>
-          <Link href="/apply" style={styles.button}>
-            Apply for {city} Access
-          </Link>
-        </div>
+          <div style={styles.ctaRow}>
+            <Link href="/apply" style={styles.primaryButton}>
+              Apply for {city} Access →
+            </Link>
+          </div>
 
-        {/* SECTION 1 */}
-        <div style={styles.section}>
-          <h2>How Roofing Leads Work in {city}</h2>
-          <ul style={styles.list}>
-            <li>Homeowners in {city} request roofing estimates</li>
-            <li>AI filters for urgency + intent</li>
-            <li>Only qualified opportunities are delivered</li>
-          </ul>
-        </div>
+          <div style={styles.trustBar}>
+            ✔ Exclusive territories&nbsp;&nbsp; ✔ Verified homeowners&nbsp;&nbsp; ✔ Real-time delivery
+          </div>
+        </header>
 
-        {/* SECTION 2 */}
-        <div style={styles.section}>
+        {/* VALUE STACK */}
+        <section style={styles.section}>
           <h2>Why Contractors in {city} Switch to RoofFlow</h2>
           <p style={styles.text}>
-            Traditional lead providers in {city} sell shared, low-intent leads.
-            RoofFlow focuses only on homeowners actively looking to hire.
+            Traditional lead companies in {city} sell the same leads to multiple contractors.
+            RoofFlow filters and routes only homeowners actively ready to hire.
           </p>
-        </div>
+        </section>
 
-        {/* SECTION 3 */}
-        <div style={styles.section}>
+        {/* HOW IT WORKS */}
+        <section style={styles.section}>
+          <h2>How It Works</h2>
+          <ul style={styles.list}>
+            <li>Homeowners in {city} request roofing quotes</li>
+            <li>AI filters urgency + budget + intent</li>
+            <li>Only qualified leads are routed to one contractor</li>
+          </ul>
+        </section>
+
+        {/* WHAT YOU GET */}
+        <section style={styles.section}>
           <h2>What You Get</h2>
           <ul style={styles.list}>
             <li>Exclusive territory access in {city}</li>
             <li>No shared or recycled leads</li>
-            <li>AI-qualified high-intent homeowners</li>
-            <li>Real-time delivery system</li>
+            <li>High-intent homeowner pipeline</li>
+            <li>Real-time lead delivery system</li>
           </ul>
-        </div>
+        </section>
 
-        {/* URGENCY BLOCK */}
+        {/* URGENCY */}
         <div style={styles.urgency}>
           ⚡ Limited contractor slots available in {city}
         </div>
 
         {/* FINAL CTA */}
-        <div style={styles.finalCta}>
+        <section style={styles.finalCta}>
           <h2>Start Receiving Roofing Leads in {city}</h2>
           <p style={styles.text}>
-            Applications are reviewed manually to maintain lead quality and exclusivity.
+            Applications are reviewed to maintain lead quality and exclusivity in each market.
           </p>
 
-          <Link href="/apply" style={styles.button}>
-            Apply Now
+          <Link href="/apply" style={styles.primaryButton}>
+            Apply Now →
           </Link>
-        </div>
+        </section>
 
       </div>
     </main>
@@ -87,67 +103,79 @@ export default function CityPage({ params }) {
 
 const styles = {
   main: {
-    background: "#0b1220",
+    background: "#070d18",
     color: "white",
     fontFamily: "system-ui",
-    padding: "60px 20px",
+    padding: "70px 20px",
   },
 
   container: {
-    maxWidth: "850px",
+    maxWidth: "900px",
     margin: "0 auto",
   },
 
+  hero: {
+    marginBottom: "50px",
+  },
+
   h1: {
-    fontSize: "42px",
-    marginBottom: "15px",
+    fontSize: "44px",
+    fontWeight: 800,
+    marginBottom: "16px",
   },
 
   subtext: {
-    opacity: 0.8,
+    opacity: 0.85,
     fontSize: "18px",
-    marginBottom: "30px",
+    lineHeight: "1.6",
+    marginBottom: "25px",
   },
 
-  ctaBox: {
-    marginBottom: "40px",
+  ctaRow: {
+    marginBottom: "20px",
   },
 
-  button: {
+  primaryButton: {
     display: "inline-block",
-    padding: "14px 18px",
-    background: "#4da3ff",
+    padding: "14px 20px",
+    background: "#3b82f6",
     color: "white",
-    borderRadius: "8px",
-    fontWeight: "bold",
+    borderRadius: "10px",
+    fontWeight: 700,
     textDecoration: "none",
   },
 
+  trustBar: {
+    fontSize: "13px",
+    opacity: 0.7,
+    marginTop: "10px",
+  },
+
   section: {
-    marginTop: "40px",
+    marginTop: "45px",
   },
 
   text: {
-    opacity: 0.8,
-    lineHeight: "1.6",
+    opacity: 0.85,
+    lineHeight: "1.7",
   },
 
   list: {
     opacity: 0.85,
-    lineHeight: "1.8",
+    lineHeight: "1.9",
   },
 
   urgency: {
-    marginTop: "40px",
-    padding: "15px",
-    background: "#1b2a44",
-    borderRadius: "8px",
+    marginTop: "45px",
+    padding: "16px",
+    background: "#111b2e",
+    borderRadius: "10px",
     textAlign: "center",
-    fontWeight: "bold",
+    fontWeight: 700,
   },
 
   finalCta: {
-    marginTop: "60px",
+    marginTop: "70px",
     textAlign: "center",
   },
 };
