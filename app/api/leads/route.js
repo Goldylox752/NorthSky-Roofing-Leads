@@ -10,68 +10,85 @@ const supabase = createClient(
 );
 
 // ===============================
-// 🔐 HELPERS
+// HELPERS
 // ===============================
 function normalizePhone(phone = "") {
-  return phone.replace(/\D/g, ""); // strip non-numbers
+  return phone.replace(/\D/g, "");
 }
 
-function hashIdentity(value) {
+function hash(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-// ===============================
-// 🚫 SIMPLE RATE LIMIT (PER IP)
-// ===============================
-async function rateLimit(ip) {
-  const windowMs = 60 * 1000; // 1 min
-  const max = 30;
-
-  const key = `${ip}:${Math.floor(Date.now() / windowMs)}`;
-
-  const { error } = await supabase
-    .from("rate_limits")
-    .insert({
-      id: key,
-      ip,
-      created_at: new Date().toISOString(),
-    });
-
-  // if insert fails → duplicate key → over limit
-  return !error || error.code !== "23505";
+function getIP(req) {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0] ||
+    req.headers.get("x-real-ip") ||
+    "unknown"
+  );
 }
 
 // ===============================
-// 🔁 IDEMPOTENCY (PREVENT DUPES)
+// 🚫 STRONG RATE LIMIT (COUNT BASED)
 // ===============================
-async function checkDuplicate(identityHash) {
-  const { data } = await supabase
-    .from("leads")
-    .select("id")
-    .eq("identity_hash", identityHash)
-    .maybeSingle();
+async function rateLimit(ip) {
+  const windowMs = 60 * 1000;
+  const max = 30;
 
-  return !!data;
+  const now = Date.now();
+  const windowStart = new Date(now - windowMs).toISOString();
+
+  const { count } = await supabase
+    .from("rate_limits")
+    .select("*", { count: "exact", head: true })
+    .eq("ip", ip)
+    .gte("created_at", windowStart);
+
+  if (count >= max) return false;
+
+  await supabase.from("rate_limits").insert({
+    ip,
+    created_at: new Date().toISOString(),
+  });
+
+  return true;
+}
+
+// ===============================
+// 🔁 ATOMIC IDEMPOTENCY (NO RACE)
+// ===============================
+async function insertLeadAtomic(payload) {
+  const { data, error } = await supabase
+    .from("leads")
+    .insert(payload)
+    .select()
+    .single();
+
+  // unique constraint hit = duplicate
+  if (error && error.code === "23505") {
+    return { duplicate: true };
+  }
+
+  if (error) throw error;
+
+  return { lead: data };
 }
 
 // ===============================
 // MAIN
 // ===============================
 export async function POST(req) {
+  const start = Date.now();
+
   try {
     const body = await req.json();
 
-    let { phone, score = 5, cityTier = "basic" } = body;
+    let { phone, score = 5, cityTier = "basic", city } = body;
+
+    const ip = getIP(req);
 
     // ===============================
-    // 🔐 IP EXTRACTION
-    // ===============================
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0] ||
-      "unknown";
-
-    // ===============================
-    // 🚫 RATE LIMIT
+    // RATE LIMIT
     // ===============================
     const allowed = await rateLimit(ip);
 
@@ -107,18 +124,9 @@ export async function POST(req) {
     score = Math.max(1, Math.min(Number(score) || 5, 10));
 
     // ===============================
-    // IDEMPOTENCY
+    // IDEMPOTENCY KEY (PHONE + CITY)
     // ===============================
-    const identityHash = hashIdentity(phone);
-
-    const isDuplicate = await checkDuplicate(identityHash);
-
-    if (isDuplicate) {
-      return Response.json({
-        success: true,
-        duplicate: true,
-      });
-    }
+    const identityHash = hash(`${phone}:${city || "global"}`);
 
     // ===============================
     // VALUE CALCULATION
@@ -126,24 +134,47 @@ export async function POST(req) {
     const leadValue = calculateLeadValue(score, cityTier);
 
     // ===============================
-    // OPTIONAL: STORE LIGHTWEIGHT LEAD (PRE-QUEUE)
+    // ATOMIC INSERT (NO DUPES EVER)
     // ===============================
-    await supabase.from("leads").insert({
+    const result = await insertLeadAtomic({
       phone,
       identity_hash: identityHash,
       score,
+      city,
       city_tier: cityTier,
-      status: "new",
+      status: "queued", // 🔥 NOT "new" anymore
+      source: "api",
       created_at: new Date().toISOString(),
     });
+
+    if (result.duplicate) {
+      return Response.json({
+        success: true,
+        duplicate: true,
+      });
+    }
+
+    const lead = result.lead;
+
+    // ===============================
+    // QUEUE PUSH (DECOUPLED SYSTEM)
+    // ===============================
+    await supabase.from("lead_queue").insert({
+      lead_id: lead.id,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    });
+
+    const duration = Date.now() - start;
 
     // ===============================
     // RESPONSE
     // ===============================
     return Response.json({
       success: true,
+      leadId: lead.id,
       leadValue,
-      tier: cityTier,
+      duration_ms: duration,
     });
 
   } catch (err) {
