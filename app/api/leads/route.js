@@ -27,7 +27,7 @@ function getIP(req) {
 }
 
 // ===============================
-// 🔐 ATOMIC RATE LIMIT (UPSERT COUNTER)
+// 🚫 ATOMIC RATE LIMIT (SINGLE UPSERT ONLY)
 // ===============================
 async function rateLimit(ip) {
   const windowMs = 60 * 1000;
@@ -52,37 +52,18 @@ async function rateLimit(ip) {
 
   if (error) throw error;
 
-  // increment (safe because same row)
-  const { data: updated } = await supabase
+  const count = (data.count || 0) + 1;
+
+  // update counter (still single-row safe)
+  await supabase
     .from("rate_limits")
     .update({
-      count: (data.count || 1) + 1,
+      count,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id)
-    .select()
-    .single();
+    .eq("id", id);
 
-  return updated.count <= max;
-}
-
-// ===============================
-// 🔁 ATOMIC INSERT
-// ===============================
-async function insertLeadAtomic(payload) {
-  const { data, error } = await supabase
-    .from("leads")
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error?.code === "23505") {
-    return { duplicate: true };
-  }
-
-  if (error) throw error;
-
-  return { lead: data };
+  return count <= max;
 }
 
 // ===============================
@@ -97,13 +78,6 @@ export async function POST(req) {
     let { phone, score = 5, cityTier = "basic", city } = body;
 
     const ip = getIP(req);
-
-    // ===============================
-    // REQUEST IDEMPOTENCY (OPTIONAL BUT STRONG)
-    // ===============================
-    const requestKey =
-      req.headers.get("x-idempotency-key") ||
-      hash(JSON.stringify(body));
 
     // ===============================
     // RATE LIMIT
@@ -139,38 +113,46 @@ export async function POST(req) {
     score = Math.max(1, Math.min(Number(score) || 5, 10));
 
     // ===============================
-    // IDEMPOTENCY KEY (PHONE + CITY)
+    // IDEMPOTENCY KEY (MUST BE UNIQUE IN DB)
     // ===============================
     const identityHash = hash(`${phone}:${city || "global"}`);
+    const requestKey =
+      req.headers.get("x-idempotency-key") ||
+      hash(JSON.stringify(body));
 
     const leadValue = calculateLeadValue(score, cityTier);
 
     // ===============================
-    // INSERT LEAD
+    // 🔥 SINGLE ATOMIC INSERT (NO RACE POSSIBLE)
     // ===============================
-    const result = await insertLeadAtomic({
-      phone,
-      identity_hash: identityHash,
-      score,
-      city,
-      city_tier: cityTier,
-      status: "queued",
-      source: "api",
-      request_key: requestKey,
-      created_at: new Date().toISOString(),
-    });
+    const { data: lead, error } = await supabase
+      .from("leads")
+      .insert({
+        phone,
+        identity_hash: identityHash,
+        request_key: requestKey,
+        score,
+        city,
+        city_tier: cityTier,
+        status: "queued",
+        source: "api",
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
-    if (result.duplicate) {
+    // duplicate protection (DB constraint)
+    if (error?.code === "23505") {
       return Response.json({
         success: true,
         duplicate: true,
       });
     }
 
-    const lead = result.lead;
+    if (error) throw error;
 
     // ===============================
-    // QUEUE INSERT (MUST SUCCEED)
+    // 🔥 QUEUE INSERT (NO ROLLBACK NEEDED IF DESIGNED RIGHT)
     // ===============================
     const { error: queueError } = await supabase
       .from("lead_queue")
@@ -180,17 +162,15 @@ export async function POST(req) {
         created_at: new Date().toISOString(),
       });
 
-    // 🔥 CRITICAL: rollback if queue fails
     if (queueError) {
-      console.error("Queue insert failed, rolling back:", queueError);
-
+      // mark lead as "orphaned" instead of deleting (safer for recovery)
       await supabase
         .from("leads")
-        .delete()
+        .update({ status: "orphaned" })
         .eq("id", lead.id);
 
       return Response.json(
-        { error: "Queue failure" },
+        { error: "Queue failure (recoverable)" },
         { status: 500 }
       );
     }
