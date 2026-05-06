@@ -9,18 +9,7 @@ const crypto = require("crypto");
 const app = express();
 
 // ===============================
-// CRASH PROTECTION (IMPORTANT)
-// ===============================
-process.on("uncaughtException", (err) => {
-  console.error("❌ UNCAUGHT EXCEPTION:", err);
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("❌ UNHANDLED REJECTION:", err);
-});
-
-// ===============================
-// ENV SAFETY CHECK (PREVENT BOOT CRASH)
+// HARD FAIL ENV (PRODUCTION SAFE)
 // ===============================
 const REQUIRED_ENV = [
   "STRIPE_SECRET_KEY",
@@ -32,24 +21,19 @@ const REQUIRED_ENV = [
 
 REQUIRED_ENV.forEach((key) => {
   if (!process.env[key]) {
-    console.error(`❌ Missing ENV: ${key}`);
+    throw new Error(`Missing ENV: ${key}`);
   }
 });
 
 // ===============================
-// INIT (SAFE)
+// INIT
 // ===============================
-const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY)
-  : null;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-const supabase =
-  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_ROLE_KEY
-      )
-    : null;
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // ===============================
 // MIDDLEWARE
@@ -60,7 +44,6 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // ===============================
 // LEAD STATES
@@ -79,109 +62,27 @@ const LEAD_STATUS = {
 app.use((req, res, next) => {
   req.id = crypto.randomUUID();
 
-  console.log(
-    JSON.stringify({
-      id: req.id,
-      method: req.method,
-      path: req.originalUrl,
-      time: new Date().toISOString(),
-    })
-  );
+  console.log(JSON.stringify({
+    id: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    time: new Date().toISOString(),
+  }));
 
   next();
 });
 
 // ===============================
-// ROOT + HEALTH (RENDER SAFE)
+// HEALTH
 // ===============================
-app.get("/", (req, res) => {
-  res.status(200).send("OK");
-});
-
-app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-  });
-});
+app.get("/", (req, res) => res.send("OK"));
+app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 // ===============================
-// STRIPE WEBHOOK (RAW BODY)
-// ===============================
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    try {
-      if (!stripe) {
-        return res.status(500).send("Stripe not initialized");
-      }
-
-      const sig = req.headers["stripe-signature"];
-
-      let event;
-
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-
-      // ===============================
-      // IDEMPOTENCY CHECK
-      // ===============================
-      const eventId = event.id;
-
-      const { data: existing } = await supabase
-        .from("stripe_events")
-        .select("id")
-        .eq("id", eventId)
-        .maybeSingle();
-
-      if (existing) {
-        return res.json({ received: true, duplicate: true });
-      }
-
-      await supabase.from("stripe_events").insert({
-        id: eventId,
-        type: event.type,
-        created_at: new Date().toISOString(),
-      });
-
-      // ===============================
-      // PAYMENT SUCCESS
-      // ===============================
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-        const leadId = session.metadata?.leadId;
-
-        if (leadId) {
-          await supabase
-            .from("leads")
-            .update({
-              status: LEAD_STATUS.PAID,
-              paid_at: new Date().toISOString(),
-            })
-            .eq("id", leadId);
-        }
-      }
-
-      return res.json({ received: true });
-
-    } catch (err) {
-      console.error("❌ Stripe webhook error:", err.message);
-      return res.status(400).send("Webhook Error");
-    }
-  }
-);
-
-// ===============================
-// CREATE LEAD
+// CREATE LEAD (IDEMPOTENT)
 // ===============================
 app.post("/api/leads", async (req, res) => {
   try {
-    if (!supabase) throw new Error("Supabase not initialized");
-
     const { name, email, phone, city } = req.body;
 
     if (!email && !phone) {
@@ -193,33 +94,59 @@ app.post("/api/leads", async (req, res) => {
 
     const leadId = crypto.randomUUID();
 
-    const lead = {
-      id: leadId,
-      name,
-      email,
-      phone,
-      city,
-      status: LEAD_STATUS.PENDING_PAYMENT,
-      created_at: new Date().toISOString(),
-      request_id: req.id,
-    };
+    // ===============================
+    // IDEMPOTENCY KEY (CRITICAL)
+    // ===============================
+    const idempotencyKey = crypto
+      .createHash("sha256")
+      .update(`${email || ""}:${phone || ""}:${city || ""}`)
+      .digest("hex");
 
+    // CHECK DUPLICATE
+    const { data: existing } = await supabase
+      .from("leads")
+      .select("id")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+
+    if (existing) {
+      return res.json({
+        success: true,
+        duplicate: true,
+        lead: existing,
+      });
+    }
+
+    // CREATE LEAD
     const { data, error } = await supabase
       .from("leads")
-      .insert(lead)
+      .insert({
+        id: leadId,
+        name,
+        email,
+        phone,
+        city,
+        status: LEAD_STATUS.PENDING_PAYMENT,
+        idempotency_key: idempotencyKey,
+        created_at: new Date().toISOString(),
+        request_id: req.id,
+      })
       .select()
       .single();
 
     if (error) throw error;
 
-    res.json({
+    return res.json({
       success: true,
       lead: data,
     });
 
   } catch (err) {
     console.error("❌ Lead error:", err);
-    res.status(500).json({ success: false, error: "Server error" });
+    return res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
   }
 });
 
@@ -228,14 +155,12 @@ app.post("/api/leads", async (req, res) => {
 // ===============================
 app.post("/api/checkout", async (req, res) => {
   try {
-    if (!stripe) throw new Error("Stripe not initialized");
-
     const { leadId, amount } = req.body;
 
-    if (!leadId || !amount) {
+    if (!leadId || typeof amount !== "number") {
       return res.status(400).json({
         success: false,
-        error: "Missing leadId or amount",
+        error: "Invalid request",
       });
     }
 
@@ -259,13 +184,77 @@ app.post("/api/checkout", async (req, res) => {
       metadata: { leadId },
     });
 
-    res.json({ success: true, url: session.url });
+    return res.json({
+      success: true,
+      url: session.url,
+    });
 
   } catch (err) {
     console.error("❌ Checkout error:", err);
-    res.status(500).json({ success: false, error: "Checkout failed" });
+    return res.status(500).json({
+      success: false,
+      error: "Checkout failed",
+    });
   }
 });
+
+// ===============================
+// STRIPE WEBHOOK (RAW BODY REQUIRED)
+// ===============================
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    try {
+      const sig = req.headers["stripe-signature"];
+
+      const event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+
+      // IDEMPOTENCY CHECK
+      const { data: existing } = await supabase
+        .from("stripe_events")
+        .select("id")
+        .eq("id", event.id)
+        .maybeSingle();
+
+      if (existing) {
+        return res.json({ received: true, duplicate: true });
+      }
+
+      await supabase.from("stripe_events").insert({
+        id: event.id,
+        type: event.type,
+        created_at: new Date().toISOString(),
+      });
+
+      // PAYMENT SUCCESS
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const leadId = session.metadata?.leadId;
+
+        if (leadId) {
+          await supabase
+            .from("leads")
+            .update({
+              status: LEAD_STATUS.PAID,
+              paid_at: new Date().toISOString(),
+            })
+            .eq("id", leadId);
+        }
+      }
+
+      return res.json({ received: true });
+
+    } catch (err) {
+      console.error("❌ Webhook error:", err.message);
+      return res.status(400).send("Webhook Error");
+    }
+  }
+);
 
 // ===============================
 // 404 HANDLER
@@ -278,10 +267,10 @@ app.use((req, res) => {
 });
 
 // ===============================
-// START SERVER
+// START
 // ===============================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Backend running on port ${PORT}`);
 });
