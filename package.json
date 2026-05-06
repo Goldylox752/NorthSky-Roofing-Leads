@@ -1,6 +1,6 @@
 {
   "name": "roof-flow-ai-backend",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "RoofFlow AI backend - lead marketplace, routing engine, Stripe billing, contractor network, realtime API",
 
   "main": "server.js",
@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "test": "echo \"No tests configured\"",
 
-    "postinstall": "echo \"Dependencies installed successfully\""
+    "postinstall": "node -e \"console.log('✔ Dependencies installed')\""
   },
 
   "dependencies": {
@@ -34,7 +34,6 @@
     "openai": "^4.56.0",
     "stripe": "^16.0.0",
     "twilio": "^4.23.0",
-    "uuid": "^10.0.0",
     "zod": "^3.23.8"
   },
 
