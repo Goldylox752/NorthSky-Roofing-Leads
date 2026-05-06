@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 
 // ===============================
-// LEAD CREATION
+// LEAD CREATE
 // ===============================
 export async function createLead(data) {
   const res = await fetch(`${API_URL}/api/leads`, {
@@ -23,5 +23,11 @@ export async function createCheckout(payload) {
     body: JSON.stringify(payload),
   });
 
-  return res.json();
+  const data = await res.json();
+
+  if (!data?.url) {
+    throw new Error("Checkout session failed");
+  }
+
+  return data;
 }
