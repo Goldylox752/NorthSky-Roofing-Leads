@@ -15,7 +15,7 @@ export async function POST(req) {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     // ===============================
-    // 🔐 ATOMIC CLAIM (NO RACE CONDITION)
+    // 🔐 ATOMIC SAFE CLAIM (FIXED LOGIC)
     // ===============================
     const { data: updated, error } = await supabase
       .from("leads")
@@ -28,17 +28,19 @@ export async function POST(req) {
         locked_at: now,
         lock_expires_at: expiresAt,
       })
-      .eq("id", leadId)
 
-      // 🧠 CRITICAL: prevents double-claim
-      .or(
-        `status.eq.new,and(status.eq.assigned,lock_expires_at.lt.${now})`
-      )
+      // ✅ TRUE RACE CONDITION PROTECTION
+      .eq("id", leadId)
+      .or("status.eq.new,status.eq.assigned")
+
+      // ⚠️ IMPORTANT: enforce expiry in same filter logic
+      .lte("lock_expires_at", now)
+
       .select()
       .maybeSingle();
 
     // ===============================
-    // ❌ FAILED CLAIM (already owned)
+    // ❌ FAILED CLAIM
     // ===============================
     if (error || !updated) {
       return Response.json(
@@ -53,14 +55,17 @@ export async function POST(req) {
     // ===============================
     // 📡 EVENT LOG (NON-BLOCKING)
     // ===============================
-    supabase.from("events").insert({
-      lead_id: leadId,
-      type: "lead_claimed",
-      payload: {
-        contractorId,
-        locked_at: now,
-      },
-    }).catch(() => {});
+    supabase
+      .from("events")
+      .insert({
+        lead_id: leadId,
+        type: "lead_claimed",
+        payload: {
+          contractorId,
+          locked_at: now,
+        },
+      })
+      .catch(() => {});
 
     // ===============================
     // RESPONSE
