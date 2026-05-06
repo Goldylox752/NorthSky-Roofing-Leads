@@ -6,12 +6,16 @@ function formatCity(slug = "") {
     .replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
+/* =========================
+   SEO METADATA (SAFE)
+========================= */
 export async function generateMetadata({ params }) {
-  const city = formatCity(params.city);
+  const city = params?.city ? formatCity(params.city) : "Your City";
 
   return {
     title: `Exclusive Roofing Leads in ${city} | RoofFlow`,
-    description: `Get exclusive, high-intent roofing leads in ${city}. RoofFlow connects contractors with homeowners actively requesting estimates.`,
+    description: `Get exclusive roofing leads in ${city}. RoofFlow connects contractors with high-intent homeowners ready to book estimates.`,
+
     openGraph: {
       title: `Roofing Leads in ${city}`,
       description: `Exclusive contractor-only roofing leads in ${city}.`,
@@ -20,8 +24,11 @@ export async function generateMetadata({ params }) {
   };
 }
 
+/* =========================
+   PAGE
+========================= */
 export default function CityPage({ params }) {
-  const city = formatCity(params.city);
+  const city = params?.city ? formatCity(params.city) : "Your City";
 
   return (
     <main style={styles.main}>
@@ -45,16 +52,16 @@ export default function CityPage({ params }) {
           </div>
 
           <div style={styles.trustBar}>
-            ✔ Exclusive territories&nbsp;&nbsp; ✔ Verified homeowners&nbsp;&nbsp; ✔ Real-time delivery
+            ✔ Exclusive territories&nbsp;&nbsp; ✔ Verified homeowners&nbsp;&nbsp; ✔ Real-time routing
           </div>
         </header>
 
-        {/* VALUE STACK */}
+        {/* VALUE */}
         <section style={styles.section}>
           <h2>Why Contractors in {city} Switch to RoofFlow</h2>
           <p style={styles.text}>
-            Traditional lead companies in {city} sell the same leads to multiple contractors.
-            RoofFlow filters and routes only homeowners actively ready to hire.
+            Traditional lead providers in {city} distribute the same lead to multiple contractors.
+            RoofFlow filters intent and assigns leads exclusively.
           </p>
         </section>
 
@@ -62,20 +69,20 @@ export default function CityPage({ params }) {
         <section style={styles.section}>
           <h2>How It Works</h2>
           <ul style={styles.list}>
-            <li>Homeowners in {city} request roofing quotes</li>
-            <li>AI filters urgency + budget + intent</li>
-            <li>Only qualified leads are routed to one contractor</li>
+            <li>Homeowners in {city} request roofing estimates</li>
+            <li>AI filters urgency, budget, and intent</li>
+            <li>Qualified leads are assigned to one contractor</li>
           </ul>
         </section>
 
-        {/* WHAT YOU GET */}
+        {/* VALUE STACK */}
         <section style={styles.section}>
           <h2>What You Get</h2>
           <ul style={styles.list}>
             <li>Exclusive territory access in {city}</li>
             <li>No shared or recycled leads</li>
             <li>High-intent homeowner pipeline</li>
-            <li>Real-time lead delivery system</li>
+            <li>Instant lead delivery system</li>
           </ul>
         </section>
 
@@ -87,8 +94,9 @@ export default function CityPage({ params }) {
         {/* FINAL CTA */}
         <section style={styles.finalCta}>
           <h2>Start Receiving Roofing Leads in {city}</h2>
+
           <p style={styles.text}>
-            Applications are reviewed to maintain lead quality and exclusivity in each market.
+            Applications are reviewed to maintain lead quality and exclusivity per market.
           </p>
 
           <Link href="/apply" style={styles.primaryButton}>
@@ -101,6 +109,9 @@ export default function CityPage({ params }) {
   );
 }
 
+/* =========================
+   STYLES
+========================= */
 const styles = {
   main: {
     background: "#070d18",
