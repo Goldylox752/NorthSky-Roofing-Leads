@@ -9,21 +9,15 @@ const crypto = require("crypto");
 const app = express();
 
 // ===============================
-// ENV SAFETY (NON-FATAL)
+// LEAD STATES (SOURCE OF TRUTH)
 // ===============================
-const REQUIRED_ENV = [
-  "STRIPE_SECRET_KEY",
-  "STRIPE_WEBHOOK_SECRET",
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "FRONTEND_URL",
-];
-
-REQUIRED_ENV.forEach((key) => {
-  if (!process.env[key]) {
-    console.warn(`⚠️ Missing env var: ${key}`);
-  }
-});
+const LEAD_STATUS = {
+  NEW: "new",
+  PENDING_PAYMENT: "pending_payment",
+  PAID: "paid",
+  DELIVERED: "delivered",
+  COMPLETED: "completed",
+};
 
 // ===============================
 // INIT
@@ -36,7 +30,7 @@ const supabase = createClient(
 );
 
 // ===============================
-// REQUEST ID + LOGGING
+// REQUEST ID LOGGING
 // ===============================
 app.use((req, res, next) => {
   req.id = crypto.randomUUID();
@@ -54,7 +48,7 @@ app.use((req, res, next) => {
 });
 
 // ===============================
-// WEBHOOK MUST BE FIRST (RAW BODY)
+// STRIPE WEBHOOK (RAW BODY FIRST)
 // ===============================
 app.post(
   "/api/stripe/webhook",
@@ -64,10 +58,6 @@ app.post(
 
     try {
       const sig = req.headers["stripe-signature"];
-
-      if (!sig) {
-        return res.status(400).send("Missing signature");
-      }
 
       event = stripe.webhooks.constructEvent(
         req.body,
@@ -81,7 +71,7 @@ app.post(
 
     try {
       // ===============================
-      // IDEMPOTENCY GUARD (IMPORTANT)
+      // IDEMPOTENCY GUARD
       // ===============================
       const eventId = event.id;
 
@@ -102,7 +92,7 @@ app.post(
       });
 
       // ===============================
-      // EVENT HANDLING
+      // PAYMENT SUCCESS
       // ===============================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
@@ -112,7 +102,7 @@ app.post(
           await supabase
             .from("leads")
             .update({
-              status: "paid",
+              status: LEAD_STATUS.PAID,
               paid_at: new Date().toISOString(),
             })
             .eq("id", leadId);
@@ -123,10 +113,7 @@ app.post(
 
     } catch (err) {
       console.error("❌ Webhook handler error:", err);
-
-      return res.status(500).json({
-        error: "Webhook failed",
-      });
+      return res.status(500).json({ error: "Webhook failed" });
     }
   }
 );
@@ -168,7 +155,7 @@ function validateLead(body) {
 }
 
 // ===============================
-// CREATE LEAD
+// CREATE LEAD (NOW STATE-AWARE)
 // ===============================
 app.post("/api/leads", async (req, res) => {
   try {
@@ -184,17 +171,24 @@ app.post("/api/leads", async (req, res) => {
 
     const { name, email, phone, city } = req.body;
 
+    const leadId = crypto.randomUUID();
+
+    const lead = {
+      id: leadId,
+      name,
+      email,
+      phone,
+      city,
+
+      status: LEAD_STATUS.PENDING_PAYMENT, // 🔥 IMPORTANT CHANGE
+
+      created_at: new Date().toISOString(),
+      requestId: req.id,
+    };
+
     const { data, error: dbError } = await supabase
       .from("leads")
-      .insert({
-        id: crypto.randomUUID(),
-        name,
-        email,
-        phone,
-        city,
-        status: "new",
-        created_at: new Date().toISOString(),
-      })
+      .insert(lead)
       .select()
       .single();
 
@@ -203,6 +197,11 @@ app.post("/api/leads", async (req, res) => {
     return res.json({
       success: true,
       lead: data,
+
+      workflow: {
+        current: LEAD_STATUS.PENDING_PAYMENT,
+        next: "checkout_required",
+      },
     });
 
   } catch (err) {
@@ -267,6 +266,40 @@ app.post("/api/checkout", async (req, res) => {
       error: "Stripe checkout failed",
     });
   }
+});
+
+// ===============================
+// ADMIN ACTIONS (DELIVERY + COMPLETION HOOKS)
+// ===============================
+
+// mark delivered (for contractor system later)
+app.post("/api/leads/deliver", async (req, res) => {
+  const { leadId } = req.body;
+
+  await supabase
+    .from("leads")
+    .update({
+      status: LEAD_STATUS.DELIVERED,
+      delivered_at: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+
+  res.json({ success: true });
+});
+
+// mark completed (contractor confirms job)
+app.post("/api/leads/complete", async (req, res) => {
+  const { leadId } = req.body;
+
+  await supabase
+    .from("leads")
+    .update({
+      status: LEAD_STATUS.COMPLETED,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+
+  res.json({ success: true });
 });
 
 // ===============================
