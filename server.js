@@ -4,11 +4,12 @@ const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
 const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
 
 const app = express();
 
 // ===============================
-// ENV VALIDATION
+// ENV SAFETY (NON-FATAL)
 // ===============================
 const REQUIRED_ENV = [
   "STRIPE_SECRET_KEY",
@@ -20,16 +21,14 @@ const REQUIRED_ENV = [
 
 REQUIRED_ENV.forEach((key) => {
   if (!process.env[key]) {
-    throw new Error(`Missing env var: ${key}`);
+    console.warn(`⚠️ Missing env var: ${key}`);
   }
 });
 
 // ===============================
 // INIT
 // ===============================
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -37,15 +36,25 @@ const supabase = createClient(
 );
 
 // ===============================
-// LOGGING
+// REQUEST ID + LOGGING
 // ===============================
 app.use((req, res, next) => {
-  console.log(`➡️ ${req.method} ${req.url}`);
+  req.id = crypto.randomUUID();
+
+  console.log(
+    JSON.stringify({
+      id: req.id,
+      method: req.method,
+      path: req.originalUrl,
+      time: new Date().toISOString(),
+    })
+  );
+
   next();
 });
 
 // ===============================
-// ✅ STRIPE WEBHOOK FIRST (CRITICAL)
+// WEBHOOK MUST BE FIRST (RAW BODY)
 // ===============================
 app.post(
   "/api/stripe/webhook",
@@ -55,6 +64,7 @@ app.post(
 
     try {
       const sig = req.headers["stripe-signature"];
+
       if (!sig) {
         return res.status(400).send("Missing signature");
       }
@@ -65,25 +75,47 @@ app.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
-      console.error("❌ Webhook signature error:", err.message);
+      console.error("❌ Stripe signature error:", err.message);
       return res.status(400).send("Webhook Error");
     }
 
     try {
+      // ===============================
+      // IDEMPOTENCY GUARD (IMPORTANT)
+      // ===============================
+      const eventId = event.id;
+
+      const { data: existing } = await supabase
+        .from("stripe_events")
+        .select("id")
+        .eq("id", eventId)
+        .maybeSingle();
+
+      if (existing) {
+        return res.json({ received: true, duplicate: true });
+      }
+
+      await supabase.from("stripe_events").insert({
+        id: eventId,
+        type: event.type,
+        created_at: new Date().toISOString(),
+      });
+
+      // ===============================
+      // EVENT HANDLING
+      // ===============================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const leadId = session.metadata?.leadId;
 
         if (leadId) {
-          const { error } = await supabase
+          await supabase
             .from("leads")
             .update({
               status: "paid",
               paid_at: new Date().toISOString(),
             })
             .eq("id", leadId);
-
-          if (error) throw error;
         }
       }
 
@@ -91,13 +123,16 @@ app.post(
 
     } catch (err) {
       console.error("❌ Webhook handler error:", err);
-      return res.status(500).json({ error: "Webhook failed" });
+
+      return res.status(500).json({
+        error: "Webhook failed",
+      });
     }
   }
 );
 
 // ===============================
-// MIDDLEWARE (AFTER WEBHOOK)
+// NORMAL MIDDLEWARE
 // ===============================
 app.use(
   cors({
@@ -109,14 +144,14 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 
 // ===============================
-// ROOT (FIXES YOUR ORIGINAL ERROR)
+// ROOT
 // ===============================
 app.get("/", (req, res) => {
   res.send("🚀 API is live");
 });
 
 // ===============================
-// HEALTH CHECK
+// HEALTH
 // ===============================
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
@@ -140,7 +175,11 @@ app.post("/api/leads", async (req, res) => {
     const error = validateLead(req.body);
 
     if (error) {
-      return res.status(400).json({ success: false, error });
+      return res.status(400).json({
+        success: false,
+        error,
+        requestId: req.id,
+      });
     }
 
     const { name, email, phone, city } = req.body;
@@ -148,6 +187,7 @@ app.post("/api/leads", async (req, res) => {
     const { data, error: dbError } = await supabase
       .from("leads")
       .insert({
+        id: crypto.randomUUID(),
         name,
         email,
         phone,
@@ -197,7 +237,9 @@ app.post("/api/checkout", async (req, res) => {
         {
           price_data: {
             currency: "usd",
-            product_data: { name: "Lead Purchase" },
+            product_data: {
+              name: "Qualified Lead",
+            },
             unit_amount: Math.round(amount * 100),
           },
           quantity: 1,
@@ -207,7 +249,9 @@ app.post("/api/checkout", async (req, res) => {
       success_url: `${process.env.FRONTEND_URL}/success`,
       cancel_url: `${process.env.FRONTEND_URL}/cancel`,
 
-      metadata: { leadId },
+      metadata: {
+        leadId,
+      },
     });
 
     return res.json({
@@ -226,20 +270,18 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 // ===============================
-// 404 HANDLER
+// 404
 // ===============================
 app.use((req, res) => {
-  console.warn("❌ Route not found:", req.method, req.url);
-
   res.status(404).json({
     success: false,
     error: "Route not found",
-    path: req.url,
+    path: req.originalUrl,
   });
 });
 
 // ===============================
-// START SERVER
+// START
 // ===============================
 const PORT = process.env.PORT || 3001;
 
