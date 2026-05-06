@@ -31,8 +31,7 @@ if (missing.length) {
 }
 
 /* ===============================
-   INIT CLIENTS (REST ONLY)
-   ⚠️ NO REALTIME USAGE HERE
+   INIT (FORCE REST ONLY - NO REALTIME)
 ================================ */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -40,7 +39,15 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   {
-    auth: { persistSession: false },
+    realtime: {
+      params: {
+        eventsPerSecond: 0, // 🚨 DISABLE REALTIME TRIGGER
+      },
+    },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
   }
 );
 
@@ -57,19 +64,17 @@ app.use(
 );
 
 /* ===============================
-   GLOBAL RATE LIMIT
+   RATE LIMIT
 ================================ */
-const globalLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use(globalLimiter);
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+  })
+);
 
 /* ===============================
-   WEBHOOK (MUST BE RAW FIRST)
+   STRIPE WEBHOOK (RAW BODY FIRST)
 ================================ */
 app.post(
   "/api/stripe/webhook",
@@ -84,7 +89,7 @@ app.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
-      // idempotency check
+      // prevent duplicates
       const { data: exists } = await supabase
         .from("stripe_events")
         .select("id")
@@ -123,7 +128,7 @@ app.post(
 );
 
 /* ===============================
-   JSON PARSER (AFTER WEBHOOK)
+   JSON PARSER
 ================================ */
 app.use(express.json({ limit: "1mb" }));
 
@@ -297,7 +302,7 @@ app.use((err, req, res, next) => {
 });
 
 /* ===============================
-   START
+   START SERVER
 ================================ */
 const PORT = process.env.PORT || 3000;
 
