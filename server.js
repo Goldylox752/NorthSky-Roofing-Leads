@@ -13,7 +13,7 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 
 /* ===============================
-   ENV VALIDATION (FAIL FAST)
+   ENV VALIDATION (SAFE MODE)
 ================================ */
 const REQUIRED_ENV = [
   "STRIPE_SECRET_KEY",
@@ -23,11 +23,12 @@ const REQUIRED_ENV = [
   "FRONTEND_URL",
 ];
 
-REQUIRED_ENV.forEach((key) => {
-  if (!process.env[key]) {
-    throw new Error(`Missing ENV: ${key}`);
-  }
-});
+const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+
+if (missingEnv.length) {
+  console.error("❌ Missing ENV:", missingEnv);
+  process.exit(1);
+}
 
 /* ===============================
    INIT CLIENTS
@@ -40,7 +41,7 @@ const supabase = createClient(
 );
 
 /* ===============================
-   SECURITY MIDDLEWARE
+   SECURITY
 ================================ */
 app.use(helmet());
 
@@ -54,20 +55,15 @@ app.use(
 /* ===============================
    RATE LIMITING
 ================================ */
-const globalLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 120,
-});
-
-const checkoutLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-});
-
-app.use(globalLimiter);
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+  })
+);
 
 /* ===============================
-   STRIPE WEBHOOK (RAW BODY FIRST)
+   WEBHOOK (RAW BODY MUST BE FIRST)
 ================================ */
 app.post(
   "/api/stripe/webhook",
@@ -82,21 +78,20 @@ app.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
-      // idempotency (prevent duplicate processing)
-      const { data: existing } = await supabase
+      // idempotency check
+      const { data: exists } = await supabase
         .from("stripe_events")
         .select("id")
         .eq("id", event.id)
         .maybeSingle();
 
-      if (!existing) {
+      if (!exists) {
         await supabase.from("stripe_events").insert({
           id: event.id,
           type: event.type,
           created_at: new Date().toISOString(),
         });
 
-        // HANDLE PAYMENT SUCCESS
         if (event.type === "checkout.session.completed") {
           const session = event.data.object;
           const leadId = session.metadata?.leadId;
@@ -115,14 +110,14 @@ app.post(
 
       res.json({ received: true });
     } catch (err) {
-      console.error("Webhook error:", err.message);
+      console.error("❌ Webhook error:", err.message);
       res.status(400).send("Webhook Error");
     }
   }
 );
 
 /* ===============================
-   JSON PARSER (AFTER WEBHOOK)
+   JSON BODY PARSER
 ================================ */
 app.use(express.json({ limit: "1mb" }));
 
@@ -132,20 +127,18 @@ app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
   req.id = crypto.randomUUID();
 
-  console.log(
-    JSON.stringify({
-      id: req.id,
-      method: req.method,
-      path: req.originalUrl,
-      time: new Date().toISOString(),
-    })
-  );
+  console.log({
+    id: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    time: new Date().toISOString(),
+  });
 
   next();
 });
 
 /* ===============================
-   LEAD STATES
+   LEAD STATUS
 ================================ */
 const LEAD_STATUS = {
   NEW: "new",
@@ -160,7 +153,7 @@ app.get("/", (req, res) => res.send("OK"));
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 /* ===============================
-   CREATE LEAD (IDEMPOTENT)
+   CREATE LEAD
 ================================ */
 app.post("/api/leads", async (req, res) => {
   try {
@@ -217,7 +210,7 @@ app.post("/api/leads", async (req, res) => {
       lead: data,
     });
   } catch (err) {
-    console.error("Lead error:", err);
+    console.error("❌ Lead error:", err);
     res.status(500).json({
       success: false,
       error: "Server error",
@@ -228,52 +221,56 @@ app.post("/api/leads", async (req, res) => {
 /* ===============================
    STRIPE CHECKOUT
 ================================ */
-app.post("/api/checkout", checkoutLimiter, async (req, res) => {
-  try {
-    const { leadId, amount } = req.body;
+app.post(
+  "/api/checkout",
+  rateLimit({ windowMs: 60 * 1000, max: 10 }),
+  async (req, res) => {
+    try {
+      const { leadId, amount } = req.body;
 
-    if (!leadId || !amount) {
-      return res.status(400).json({
+      if (!leadId || !amount) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid request",
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: "Qualified Lead",
+              },
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${process.env.FRONTEND_URL}/success`,
+        cancel_url: `${process.env.FRONTEND_URL}/cancel`,
+        metadata: { leadId },
+      });
+
+      res.json({
+        success: true,
+        url: session.url,
+      });
+    } catch (err) {
+      console.error("❌ Checkout error:", err);
+      res.status(500).json({
         success: false,
-        error: "Invalid request",
+        error: "Checkout failed",
       });
     }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: "Qualified Lead",
-            },
-            unit_amount: Math.round(amount * 100),
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `${process.env.FRONTEND_URL}/success`,
-      cancel_url: `${process.env.FRONTEND_URL}/cancel`,
-      metadata: { leadId },
-    });
-
-    res.json({
-      success: true,
-      url: session.url,
-    });
-  } catch (err) {
-    console.error("Checkout error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Checkout failed",
-    });
   }
-});
+);
 
 /* ===============================
-   404 HANDLER
+   404
 ================================ */
 app.use((req, res) => {
   res.status(404).json({
@@ -283,10 +280,10 @@ app.use((req, res) => {
 });
 
 /* ===============================
-   ERROR HANDLER
+   GLOBAL ERROR HANDLER
 ================================ */
 app.use((err, req, res, next) => {
-  console.error("🔥 Server Error:", err);
+  console.error("🔥 Server error:", err);
   res.status(500).json({
     success: false,
     error: "Internal server error",
