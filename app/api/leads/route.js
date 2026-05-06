@@ -13,38 +13,92 @@ app.post("/api/leads", async (req, res) => {
     const { name, email, phone, city } = req.body;
 
     // =====================
-    // CREATE LEAD ID (SAFE + UNIQUE)
+    // 🧠 IDEMPOTENCY KEY (PREVENT DUPLICATES)
+    // =====================
+    const idempotencyKey = crypto
+      .createHash("sha256")
+      .update(`${email || ""}:${phone || ""}:${city || ""}`)
+      .digest("hex");
+
+    // =====================
+    // CREATE LEAD ID
     // =====================
     const leadId = crypto.randomUUID();
 
+    // =====================
+    // 🧠 LEAD SCORING ENGINE (MONEY PRIORITY)
+    // =====================
+    let score = 50;
+
+    if (email) score += 10;
+    if (phone) score += 20;
+    if (city) score += 10;
+
+    if (phone && email) score += 10; // high intent
+
+    const tier =
+      score >= 80 ? "hot" :
+      score >= 60 ? "warm" :
+      "cold";
+
+    // =====================
+    // 💰 PRICING ENGINE (SCALABLE)
+    // =====================
+    const basePrices = {
+      Edmonton: 14900,
+      Calgary: 12900,
+      default: 9900,
+    };
+
+    let price = basePrices[city] || basePrices.default;
+
+    if (tier === "hot") price += 2000;
+    if (tier === "cold") price -= 1000;
+
+    // =====================
+    // 🧭 CONTRACTOR ROUTING HOOK (FUTURE SYSTEM)
+    // =====================
+    const contractorId =
+      city === "Edmonton"
+        ? "contractor_edm_1"
+        : city === "Calgary"
+        ? "contractor_cal_1"
+        : "contractor_default";
+
+    // =====================
+    // LEAD OBJECT
+    // =====================
     const lead = {
       id: leadId,
       name: name?.trim() || null,
       email: email?.trim().toLowerCase() || null,
       phone: phone?.trim() || null,
       city: city?.trim() || null,
+
       status: "new",
+      tier,
+      score,
+
+      contractorId,
+
       createdAt: new Date().toISOString(),
       requestId: req.id,
+      idempotencyKey,
     };
 
     // =====================
-    // LOG LEAD
+    // LOG (STRUCTURED EVENT)
     // =====================
-    console.log("📩 NEW_LEAD", lead);
+    console.log("📩 LEAD_CREATED", {
+      leadId,
+      tier,
+      score,
+      city,
+      price,
+    });
 
     // =====================
-    // 💰 PRICING LOGIC (IMPORTANT FOR MONEY FLOW)
-    // =====================
-    let price = 9900; // default $99
-
-    if (city === "Edmonton") price = 14900;
-    if (city === "Calgary") price = 12900;
-
-    if (phone && email) price += 2000; // higher quality lead
-
-    // =====================
-    // RESPONSE (FRONTEND + STRIPE FLOW)
+    // 💰 RESPONSE (STRIPE READY FORMAT)
     // =====================
     return res.status(200).json({
       success: true,
@@ -52,13 +106,25 @@ app.post("/api/leads", async (req, res) => {
 
       lead,
 
-      // 🔥 THIS IS WHAT MAKES YOU MONEY
       monetization: {
         enabled: true,
         currency: "usd",
         price: price / 100,
-        checkoutRequired: true,
-        checkoutEndpoint: "/api/checkout",
+        tier,
+      },
+
+      checkout: {
+        required: true,
+        endpoint: "/api/checkout",
+        payload: {
+          leadId,
+          amount: price / 100,
+          email,
+        },
+      },
+
+      routing: {
+        contractorId,
       },
 
       nextStep: {
