@@ -3,12 +3,20 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
 // ===============================
-// ENV VALIDATION
+// ENV VALIDATION (FAIL FAST)
 // ===============================
-if (!process.env.STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY");
-if (!process.env.SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-if (!process.env.FRONTEND_URL) throw new Error("Missing FRONTEND_URL");
+const required = [
+  "STRIPE_SECRET_KEY",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "FRONTEND_URL",
+];
+
+for (const key of required) {
+  if (!process.env[key]) {
+    throw new Error(`Missing ENV: ${key}`);
+  }
+}
 
 // ===============================
 // INIT
@@ -23,74 +31,78 @@ const supabase = createClient(
 );
 
 // ===============================
-// PRICING
+// PRICING (CENT-BASED SAFETY)
 // ===============================
-const PLANS = {
+const PLANS = Object.freeze({
   starter: 9900,
   growth: 19900,
   elite: 49900,
-};
+});
 
 // ===============================
 // HELPERS
 // ===============================
-const normalizeEmail = (e = "") => e.trim().toLowerCase();
+const normalizeEmail = (email = "") =>
+  email.trim().toLowerCase();
 
-const hash = (v) =>
+const sha = (v) =>
   crypto.createHash("sha256").update(v).digest("hex");
 
-function buildCheckoutKey(email, plan) {
-  return hash(`${email}:${plan}`);
-}
+const buildKey = (email, plan) =>
+  sha(`${email}:${plan}`);
 
 // ===============================
-// 🔐 RATE LIMIT
+// 🚨 RATE LIMIT (HARD PROTECTION)
 // ===============================
-async function abuseCheck(email) {
-  const window = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+async function rateLimit(email) {
+  const windowStart = new Date(Date.now() - 5 * 60 * 1000);
 
   const { count, error } = await supabase
     .from("checkout_attempts")
     .select("*", { count: "exact", head: true })
     .eq("email", email)
-    .gte("created_at", window);
+    .gte("created_at", windowStart.toISOString());
 
   if (error) {
-    console.error("abuseCheck error:", error);
-    return { allowed: true }; // fail open, don’t block legit users
+    console.error("rateLimit error:", error);
+    return { allowed: true }; // fail open
   }
 
-  if ((count || 0) >= 10) return { allowed: false, reason: "hard" };
-  if ((count || 0) >= 5) return { allowed: false, reason: "soft" };
+  if ((count || 0) >= 12) {
+    return { allowed: false, reason: "blocked" };
+  }
+
+  if ((count || 0) >= 6) {
+    return { allowed: false, reason: "cooldown" };
+  }
 
   return { allowed: true };
 }
 
 // ===============================
-// 🔐 LOCK (FIXED)
+// 🔐 CHECKOUT LOCK (RACE SAFE)
 // ===============================
-async function ensureCheckoutLock(key, email, plan) {
-  const now = new Date().toISOString();
+async function acquireLock(key, email, plan) {
+  const now = new Date();
 
-  const { data: existing, error: fetchError } = await supabase
+  const { data, error } = await supabase
     .from("checkout_locks")
     .select("*")
     .eq("id", key)
     .maybeSingle();
 
-  if (fetchError) throw fetchError;
+  if (error) throw error;
 
-  // 🔥 If active and NOT expired → block
+  // active lock still valid
   if (
-    existing &&
-    existing.status === "active" &&
-    new Date(existing.expires_at) > new Date()
+    data?.status === "active" &&
+    new Date(data.expires_at) > now
   ) {
     return { allowed: false };
   }
 
-  // otherwise overwrite (expired or missing)
-  const { error } = await supabase
+  // upsert lock
+  const { error: upsertError } = await supabase
     .from("checkout_locks")
     .upsert(
       {
@@ -98,21 +110,23 @@ async function ensureCheckoutLock(key, email, plan) {
         email,
         plan,
         status: "active",
-        created_at: now,
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        created_at: now.toISOString(),
+        expires_at: new Date(
+          Date.now() + 25 * 60 * 1000
+        ).toISOString(),
       },
       { onConflict: "id" }
     );
 
-  if (error) throw error;
+  if (upsertError) throw upsertError;
 
   return { allowed: true };
 }
 
 // ===============================
-// CLEANUP (NON-BLOCKING)
+// 🧹 CLEANUP (NON-BLOCKING)
 // ===============================
-function cleanupLocks() {
+function expireOldLocks() {
   supabase
     .from("checkout_locks")
     .update({ status: "expired" })
@@ -123,20 +137,18 @@ function cleanupLocks() {
 }
 
 // ===============================
-// MAIN ROUTE
+// MAIN CHECKOUT ROUTE
 // ===============================
 export async function POST(req) {
   try {
-    const body = await req.json();
+    const { plan, email } = await req.json();
 
-    let { plan, email } = body;
-
-    email = normalizeEmail(email);
+    const cleanEmail = normalizeEmail(email);
 
     // ===============================
     // VALIDATION
     // ===============================
-    if (!plan || !email) {
+    if (!plan || !cleanEmail) {
       return Response.json(
         { error: "Missing plan or email" },
         { status: 400 }
@@ -152,33 +164,36 @@ export async function POST(req) {
       );
     }
 
-    cleanupLocks();
+    expireOldLocks();
 
     // ===============================
     // RATE LIMIT
     // ===============================
-    const abuse = await abuseCheck(email);
+    const limit = await rateLimit(cleanEmail);
 
-    if (!abuse.allowed) {
+    if (!limit.allowed) {
       return Response.json(
         {
           error:
-            abuse.reason === "hard"
-              ? "Account temporarily blocked"
-              : "Too many checkout attempts",
+            limit.reason === "blocked"
+              ? "Too many attempts (blocked)"
+              : "Too many attempts (cooldown)",
         },
         { status: 429 }
       );
     }
 
     // ===============================
-    // LOCK
+    // IDEMPOTENCY KEY
     // ===============================
-    const checkoutKey = buildCheckoutKey(email, plan);
+    const checkoutKey = buildKey(cleanEmail, plan);
 
-    const lock = await ensureCheckoutLock(
+    // ===============================
+    // LOCK CHECK
+    // ===============================
+    const lock = await acquireLock(
       checkoutKey,
-      email,
+      cleanEmail,
       plan
     );
 
@@ -190,13 +205,14 @@ export async function POST(req) {
     }
 
     // ===============================
-    // STRIPE SESSION (WITH IDEMPOTENCY)
+    // STRIPE SESSION (SAFE + IDEMPOTENT)
     // ===============================
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
+        customer_email: cleanEmail,
+
         payment_method_types: ["card"],
-        customer_email: email,
 
         line_items: [
           {
@@ -216,40 +232,44 @@ export async function POST(req) {
 
         metadata: {
           plan,
-          email,
+          email: cleanEmail,
           checkout_key: checkoutKey,
         },
       },
       {
-        idempotencyKey: checkoutKey, // 🔥 CRITICAL FIX
+        idempotencyKey: checkoutKey,
       }
     );
 
     // ===============================
-    // LOG ATTEMPT (NON-BLOCKING)
+    // NON-BLOCKING LOGGING
     // ===============================
     supabase.from("checkout_attempts").insert({
-      email,
+      email: cleanEmail,
       plan,
       created_at: new Date().toISOString(),
     }).catch(() => {});
 
     supabase.from("events").insert({
       type: "checkout.created",
-      email,
+      email: cleanEmail,
       plan,
       stripe_session_id: session.id,
       checkout_key: checkoutKey,
       created_at: new Date().toISOString(),
     }).catch(() => {});
 
+    // ===============================
+    // RESPONSE
+    // ===============================
     return Response.json({
       url: session.url,
       checkoutKey,
+      amount,
     });
 
   } catch (err) {
-    console.error("❌ Checkout error:", err);
+    console.error("❌ Checkout crash:", err);
 
     return Response.json(
       { error: "Checkout failed" },
