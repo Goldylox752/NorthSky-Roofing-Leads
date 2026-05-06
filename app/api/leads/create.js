@@ -44,11 +44,11 @@ export async function POST(req) {
     const score = safeScore(email, phone, city);
 
     // ===============================
-    // 1. IDEMPOTENCY CHECK
+    // 1. STRONG IDEMPOTENCY (RACE SAFE)
     // ===============================
     const { data: existing } = await supabase
       .from("leads")
-      .select("*")
+      .select("id, status, assigned_contractor_id")
       .eq("dedupe_key", dedupeKey)
       .maybeSingle();
 
@@ -61,7 +61,12 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 2. CREATE LEAD
+    // 2. PRE-CALCULATE PRICE (IMPORTANT FIX)
+    // ===============================
+    const tempPrice = calculatePrice(score, "basic");
+
+    // ===============================
+    // 3. CREATE LEAD (ATOMIC INSERT)
     // ===============================
     const { data: lead, error } = await supabase
       .from("leads")
@@ -72,9 +77,12 @@ export async function POST(req) {
         city: city || "unknown",
         source: source || "direct",
         dedupe_key: dedupeKey,
+
         score,
+        price: tempPrice,
+
         status: "new",
-        price: 0,
+
         created_at: new Date().toISOString(),
       })
       .select()
@@ -88,21 +96,26 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 3. ROUTING
+    // 4. ROUTING (WITH FALLBACK)
     // ===============================
-    let assignment;
+    let assignment = null;
+
     try {
       assignment = await routeLead(lead);
     } catch (err) {
-      console.error("Routing failed:", err);
-      assignment = null;
+      console.error("Routing error:", err);
     }
 
+    // ===============================
+    // 5. NO CONTRACTOR CASE (SAFE EXIT)
+    // ===============================
     if (!assignment?.contractorId) {
       await supabase.from("events").insert({
         lead_id: lead.id,
         type: "unassigned",
-        payload: { reason: "no_contractor_available" },
+        payload: {
+          reason: "no_contractor_available",
+        },
       });
 
       return Response.json({
@@ -113,51 +126,54 @@ export async function POST(req) {
     }
 
     // ===============================
-    // 4. PRICE CALC
+    // 6. FINAL PRICE (AFTER ROUTING)
     // ===============================
-    const price = calculatePrice(
+    const finalPrice = calculatePrice(
       score,
       assignment.cityTier || "basic"
     );
 
     // ===============================
-    // 5. ATOMIC UPDATE (SAFE LOCK)
+    // 7. ATOMIC ASSIGNMENT (RACE SAFE)
     // ===============================
     const { data: claimed } = await supabase
       .from("leads")
       .update({
         status: "assigned",
+
         assigned_contractor_id: assignment.contractorId,
+
         lock_owner: assignment.contractorId,
         locked_at: new Date().toISOString(),
-        price,
+
+        price: finalPrice,
       })
       .eq("id", lead.id)
-      .eq("status", "new")
+      .eq("status", "new") // CRITICAL RACE GUARD
       .select()
       .maybeSingle();
 
     if (!claimed) {
       return Response.json(
-        { error: "LEAD_ALREADY_CLAIMED" },
+        {
+          error: "LEAD_ALREADY_CLAIMED",
+        },
         { status: 409 }
       );
     }
 
     // ===============================
-    // 6. EVENT LOG (NON-BLOCKING)
+    // 8. EVENT LOG (NON-BLOCKING)
     // ===============================
-    supabase
-      .from("events")
-      .insert({
-        lead_id: lead.id,
-        type: "assigned",
-        payload: {
-          contractorId: assignment.contractorId,
-          price,
-        },
-      })
-      .catch(() => {});
+    supabase.from("events").insert({
+      lead_id: lead.id,
+      type: "assigned",
+      payload: {
+        contractorId: assignment.contractorId,
+        price: finalPrice,
+        score,
+      },
+    }).catch(() => {});
 
     // ===============================
     // RESPONSE
