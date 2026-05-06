@@ -11,83 +11,69 @@ export async function POST(req) {
       );
     }
 
-    const now = new Date();
-    const nowIso = now.toISOString();
-    const expiresAtIso = new Date(
-      Date.now() + 5 * 60 * 1000
-    ).toISOString();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     // ===============================
-    // STEP 1: FETCH CURRENT STATE (SAFE CHECK)
+    // 🔐 ATOMIC CLAIM (NO RACE CONDITION)
     // ===============================
-    const { data: lead, error: fetchError } = await supabase
+    const { data: updated, error } = await supabase
       .from("leads")
-      .select("id, status, lock_expires_at")
+      .update({
+        status: "assigned",
+
+        assigned_contractor_id: contractorId,
+        lock_owner: contractorId,
+
+        locked_at: now,
+        lock_expires_at: expiresAt,
+      })
       .eq("id", leadId)
+
+      // 🧠 CRITICAL: prevents double-claim
+      .or(
+        `status.eq.new,and(status.eq.assigned,lock_expires_at.lt.${now})`
+      )
+      .select()
       .maybeSingle();
 
-    if (fetchError || !lead) {
-      return Response.json(
-        { success: false, error: "Lead not found" },
-        { status: 404 }
-      );
-    }
-
     // ===============================
-    // STEP 2: CHECK IF CLAIMABLE (LOGIC LAYER)
+    // ❌ FAILED CLAIM (already owned)
     // ===============================
-    const isLocked =
-      lead.status === "assigned" &&
-      lead.lock_expires_at &&
-      new Date(lead.lock_expires_at) > now;
-
-    if (lead.status === "assigned" && isLocked) {
+    if (error || !updated) {
       return Response.json(
         {
           success: false,
-          error: "Lead already claimed",
+          error: "LEAD_ALREADY_CLAIMED",
         },
         { status: 409 }
       );
     }
 
     // ===============================
-    // STEP 3: CLAIM LEAD (SAFE UPDATE)
+    // 📡 EVENT LOG (NON-BLOCKING)
     // ===============================
-    const { data: updated, error: updateError } = await supabase
-      .from("leads")
-      .update({
-        status: "assigned",
-        assigned_contractor_id: contractorId,
-        lock_owner: contractorId,
-        locked_at: nowIso,
-        lock_expires_at: expiresAtIso,
-      })
-      .eq("id", leadId)
-      .select()
-      .single();
-
-    if (updateError || !updated) {
-      return Response.json(
-        {
-          success: false,
-          error: "Failed to claim lead",
-        },
-        { status: 500 }
-      );
-    }
+    supabase.from("events").insert({
+      lead_id: leadId,
+      type: "lead_claimed",
+      payload: {
+        contractorId,
+        locked_at: now,
+      },
+    }).catch(() => {});
 
     // ===============================
-    // SUCCESS RESPONSE (FRONTEND SAFE)
+    // RESPONSE
     // ===============================
     return Response.json({
       success: true,
       lead: updated,
       lockedBy: contractorId,
+      expiresAt,
     });
 
   } catch (err) {
-    console.error("Lead claim error:", err);
+    console.error("🔥 Lead claim error:", err);
 
     return Response.json(
       {
