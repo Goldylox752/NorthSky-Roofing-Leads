@@ -29,29 +29,22 @@ if (missing.length) {
 }
 
 /* =========================
-   INIT CLIENTS (FIX: NO REALTIME)
+   INIT CLIENTS (SAFE MODE)
 ========================= */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 /**
- * 🚨 IMPORTANT FIX:
- * We explicitly DISABLE realtime usage to prevent
- * Node 20 WebSocket crash on Render.
+ * 🚨 IMPORTANT:
+ * Do NOT enable realtime in backend.
+ * It triggers WebSocket crash on Node 20 (Render issue).
  */
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    realtime: {
-      params: {
-        eventsPerSecond: 0,
-      },
-    },
-  }
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 /* =========================
-   MIDDLEWARE
+   SECURITY / CORS (HARDENED)
 ========================= */
 app.use(
   cors({
@@ -62,12 +55,55 @@ app.use(
         return cb(null, true);
       }
 
-      return cb(new Error("CORS blocked: " + origin));
+      return cb(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
   })
 );
 
+/**
+ * IMPORTANT:
+ * Stripe webhook MUST come BEFORE express.json
+ */
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    try {
+      const sig = req.headers["stripe-signature"];
+
+      const event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const leadId = session.metadata?.leadId;
+
+        if (leadId) {
+          await supabase
+            .from("leads")
+            .update({
+              status: "paid",
+              paid_at: new Date().toISOString(),
+            })
+            .eq("id", leadId);
+        }
+      }
+
+      res.json({ received: true });
+    } catch (err) {
+      console.error("❌ Webhook error:", err.message);
+      res.status(400).send("Webhook Error");
+    }
+  }
+);
+
+/* =========================
+   JSON MIDDLEWARE
+========================= */
 app.use(express.json({ limit: "1mb" }));
 
 /* =========================
@@ -77,12 +113,13 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "roofflow-backend",
+    uptime: process.uptime(),
     time: new Date().toISOString(),
   });
 });
 
 /* =========================
-   LEADS API
+   CREATE LEAD
 ========================= */
 app.post("/api/leads", async (req, res) => {
   try {
@@ -179,51 +216,23 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 /* =========================
-   STRIPE WEBHOOK (RAW BODY REQUIRED)
-========================= */
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    try {
-      const sig = req.headers["stripe-signature"];
-
-      const event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-        const leadId = session.metadata?.leadId;
-
-        if (leadId) {
-          await supabase
-            .from("leads")
-            .update({
-              status: "paid",
-              paid_at: new Date().toISOString(),
-            })
-            .eq("id", leadId);
-        }
-      }
-
-      res.json({ received: true });
-    } catch (err) {
-      console.error("Webhook error:", err.message);
-      res.status(400).send("Webhook Error");
-    }
-  }
-);
-
-/* =========================
    404 HANDLER
 ========================= */
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: "Route not found",
+  });
+});
+
+/* =========================
+   GLOBAL ERROR HANDLER
+========================= */
+app.use((err, req, res, next) => {
+  console.error("🔥 Server crash:", err);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
   });
 });
 
