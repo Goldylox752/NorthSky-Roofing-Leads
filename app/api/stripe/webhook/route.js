@@ -3,9 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-// ===============================
-// ENV VALIDATION
-// ===============================
+/* ===============================
+   ENV CHECK
+=============================== */
 const REQUIRED_ENV = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
@@ -13,15 +13,15 @@ const REQUIRED_ENV = [
   "SUPABASE_SERVICE_ROLE_KEY",
 ];
 
-REQUIRED_ENV.forEach((key) => {
+for (const key of REQUIRED_ENV) {
   if (!process.env[key]) {
-    throw new Error(`Missing ${key}`);
+    throw new Error(`Missing ENV: ${key}`);
   }
-});
+}
 
-// ===============================
-// INIT
-// ===============================
+/* ===============================
+   INIT
+=============================== */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
 });
@@ -31,150 +31,127 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ===============================
-// SAFE DB HELPERS
-// ===============================
-async function getEvent(eventId) {
-  const { data, error } = await supabase
-    .from("stripe_events")
-    .select("id, status")
-    .eq("id", eventId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("getEvent error:", error);
-    return null;
-  }
-
-  return data;
-}
-
-async function createEventLock(event) {
+/* ===============================
+   SAFE EVENT LOCK
+=============================== */
+async function lockEvent(event) {
   const { error } = await supabase.from("stripe_events").insert({
     id: event.id,
     type: event.type,
     status: "processing",
-    locked_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
   });
 
   if (error) {
-    // duplicate event
-    return { duplicate: true };
+    return { locked: false }; // duplicate
   }
 
-  return { duplicate: false };
+  return { locked: true };
 }
 
-async function finalize(eventId, status, err = null) {
-  const { error } = await supabase
+/* ===============================
+   FINALIZE EVENT
+=============================== */
+async function finalize(eventId, status, error = null) {
+  await supabase
     .from("stripe_events")
     .update({
       status,
+      error: error?.message || null,
       processed_at: new Date().toISOString(),
-      error: err?.message || null,
     })
     .eq("id", eventId);
-
-  if (error) {
-    console.error("finalize error:", error);
-  }
 }
 
-// ===============================
-// EVENT HANDLER
-// ===============================
+/* ===============================
+   EVENT HANDLER
+=============================== */
 async function handleEvent(event) {
-  try {
-    switch (event.type) {
+  switch (event.type) {
 
-      // =========================
-      // PAYMENT SUCCESS
-      // =========================
-      case "checkout.session.completed": {
-        const session = event.data.object;
+    /* =========================
+       CHECKOUT SUCCESS
+    ========================= */
+    case "checkout.session.completed": {
+      const session = event.data.object;
 
-        const email = session.customer_details?.email;
-        const customerId = session.customer;
-        const subscriptionId = session.subscription;
-        const city = session.metadata?.city;
+      const email = session.customer_details?.email;
+      const customerId = session.customer;
+      const subscriptionId = session.subscription;
+      const city = session.metadata?.city || null;
 
-        if (!email) {
-          console.warn("⚠️ Missing email in session");
-          return;
-        }
-
-        const { data: contractor, error } = await supabase
-          .from("contractors")
-          .upsert(
-            {
-              email,
-              stripe_customer_id: customerId,
-              stripe_subscription_id: subscriptionId,
-              active: true,
-              plan: city ? "city_owner" : "pro",
-              city: city || null,
-            },
-            { onConflict: "email" }
-          )
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        await supabase.from("events").insert({
-          type: "stripe.checkout.completed",
-          contractor_id: contractor.id,
-          payload: session,
-        });
-
-        break;
+      if (!email) {
+        throw new Error("Missing customer email");
       }
 
-      // =========================
-      // SUB UPDATED
-      // =========================
-      case "customer.subscription.updated": {
-        const sub = event.data.object;
+      const { data, error } = await supabase
+        .from("contractors")
+        .upsert(
+          {
+            email,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId,
+            active: true,
+            plan: city ? "city_owner" : "pro",
+            city,
+          },
+          { onConflict: "email" }
+        )
+        .select()
+        .single();
 
-        await supabase
-          .from("contractors")
-          .update({
-            active: sub.status === "active",
-          })
-          .eq("stripe_customer_id", sub.customer);
+      if (error) throw error;
 
-        break;
-      }
+      await supabase.from("events").insert({
+        type: "stripe.checkout.completed",
+        contractor_id: data.id,
+        payload: session,
+      });
 
-      // =========================
-      // SUB DELETED
-      // =========================
-      case "customer.subscription.deleted": {
-        const sub = event.data.object;
-
-        await supabase
-          .from("contractors")
-          .update({
-            active: false,
-            plan: "free",
-          })
-          .eq("stripe_customer_id", sub.customer);
-
-        break;
-      }
-
-      default:
-        console.log("Unhandled event:", event.type);
+      break;
     }
-  } catch (err) {
-    console.error("❌ Handler error:", err);
-    throw err;
+
+    /* =========================
+       SUB UPDATED
+    ========================= */
+    case "customer.subscription.updated": {
+      const sub = event.data.object;
+
+      await supabase
+        .from("contractors")
+        .update({
+          active: sub.status === "active",
+        })
+        .eq("stripe_customer_id", sub.customer);
+
+      break;
+    }
+
+    /* =========================
+       SUB DELETED
+    ========================= */
+    case "customer.subscription.deleted": {
+      const sub = event.data.object;
+
+      await supabase
+        .from("contractors")
+        .update({
+          active: false,
+          plan: "free",
+        })
+        .eq("stripe_customer_id", sub.customer);
+
+      break;
+    }
+
+    default:
+      console.log("Unhandled Stripe event:", event.type);
   }
 }
 
-// ===============================
-// WEBHOOK ENDPOINT
-// ===============================
+/* ===============================
+   WEBHOOK ROUTE
+=============================== */
 export async function POST(req) {
   let event;
 
@@ -185,35 +162,39 @@ export async function POST(req) {
       return new Response("Missing signature", { status: 400 });
     }
 
-    const body = await req.text();
+    const rawBody = await req.text();
 
-    // ===============================
-    // VERIFY STRIPE SIGNATURE
-    // ===============================
+    /* =========================
+       VERIFY STRIPE SIGNATURE
+    ========================= */
     event = stripe.webhooks.constructEvent(
-      body,
+      rawBody,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
 
-    // ===============================
-    // IDEMPOTENCY CHECK
-    // ===============================
-    const existing = await getEvent(event.id);
+    /* =========================
+       IDEMPOTENCY CHECK
+    ========================= */
+    const { data: existing } = await supabase
+      .from("stripe_events")
+      .select("id, status")
+      .eq("id", event.id)
+      .maybeSingle();
 
     if (existing?.status === "completed") {
       return Response.json({ ok: true, duplicate: true });
     }
 
-    const lock = await createEventLock(event);
+    const lock = await lockEvent(event);
 
-    if (lock.duplicate) {
+    if (!lock.locked) {
       return Response.json({ ok: true, duplicate: true });
     }
 
-    // ===============================
-    // PROCESS EVENT
-    // ===============================
+    /* =========================
+       PROCESS
+    ========================= */
     await handleEvent(event);
 
     await finalize(event.id, "completed");
@@ -221,7 +202,7 @@ export async function POST(req) {
     return Response.json({ received: true });
 
   } catch (err) {
-    console.error("❌ Webhook error:", err);
+    console.error("❌ Stripe webhook error:", err);
 
     if (event?.id) {
       await finalize(event.id, "failed", err);
