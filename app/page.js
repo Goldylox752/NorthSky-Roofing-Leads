@@ -13,6 +13,7 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [leadId, setLeadId] = useState(null);
+  const [error, setError] = useState(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -26,8 +27,15 @@ export default function Page() {
   const handleSubmit = async () => {
     if (loading) return;
 
+    setError(null);
+
+    if (!API_URL) {
+      setError("API not configured");
+      return;
+    }
+
     if (!form.email || !form.phone) {
-      alert("Email and phone are required.");
+      setError("Email and phone are required");
       return;
     }
 
@@ -47,11 +55,11 @@ export default function Page() {
 
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Request failed");
+      if (!res.ok) {
+        throw new Error(data?.error || "Request failed");
       }
 
-      setLeadId(data.lead?.id);
+      setLeadId(data.lead?.id || null);
       setSuccess(true);
 
       setForm({
@@ -61,78 +69,34 @@ export default function Page() {
         city: "",
       });
     } catch (err) {
-      alert("Submission failed. Try again.");
       console.error(err);
+      setError("Submission failed. Try again.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main style={{ fontFamily: "Arial", padding: 40, maxWidth: 700, margin: "0 auto" }}>
-      
-      {/* HERO */}
-      <h1 style={{ fontSize: 40, marginBottom: 10 }}>
-        RoofFlow AI Leads
-      </h1>
+    <main style={styles.container}>
+      <h1>RoofFlow AI Leads</h1>
 
-      <p style={{ marginBottom: 20 }}>
-        Exclusive roofing leads. One contractor per city.
-      </p>
+      <p>Exclusive roofing leads. One contractor per city.</p>
 
-      {/* FORM / SUCCESS */}
+      {error && <p style={styles.error}>{error}</p>}
+
       {success ? (
-        <div style={{ padding: 20, background: "#eaffea", borderRadius: 10 }}>
+        <div style={styles.success}>
           <h2>Application Received ✔</h2>
-          <p>We will review your request shortly.</p>
-          <p><b>Tracking ID:</b> {leadId}</p>
+          <p>Tracking ID: {leadId}</p>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          
-          <input
-            name="name"
-            placeholder="Name"
-            value={form.name}
-            onChange={handleChange}
-            style={inputStyle}
-          />
+        <div style={styles.form}>
+          <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
+          <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
+          <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
+          <input name="city" placeholder="City" value={form.city} onChange={handleChange} style={styles.input} />
 
-          <input
-            name="email"
-            placeholder="Email *"
-            value={form.email}
-            onChange={handleChange}
-            style={inputStyle}
-          />
-
-          <input
-            name="phone"
-            placeholder="Phone *"
-            value={form.phone}
-            onChange={handleChange}
-            style={inputStyle}
-          />
-
-          <input
-            name="city"
-            placeholder="City"
-            value={form.city}
-            onChange={handleChange}
-            style={inputStyle}
-          />
-
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            style={{
-              padding: 12,
-              background: loading ? "#999" : "#000",
-              color: "#fff",
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
+          <button onClick={handleSubmit} disabled={loading} style={styles.button}>
             {loading ? "Submitting..." : "Apply Now"}
           </button>
         </div>
@@ -141,8 +105,36 @@ export default function Page() {
   );
 }
 
-const inputStyle = {
-  padding: 12,
-  border: "1px solid #ccc",
-  borderRadius: 6,
+const styles = {
+  container: {
+    fontFamily: "Arial",
+    padding: 40,
+    maxWidth: 600,
+    margin: "0 auto",
+  },
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  input: {
+    padding: 12,
+    border: "1px solid #ccc",
+    borderRadius: 6,
+  },
+  button: {
+    padding: 12,
+    background: "#000",
+    color: "#fff",
+    border: "none",
+    cursor: "pointer",
+  },
+  success: {
+    padding: 20,
+    background: "#eaffea",
+    borderRadius: 10,
+  },
+  error: {
+    color: "red",
+  },
 };
