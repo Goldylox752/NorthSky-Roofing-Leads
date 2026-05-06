@@ -3,17 +3,21 @@
 import { createClient } from "@supabase/supabase-js";
 
 // ===============================
-// INIT (SAFE)
+// INIT (SAFE + SINGLETON)
 // ===============================
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-let supabase = null;
+// prevent multiple clients in dev/hot reload
+let supabase = globalThis.__supabase;
 
-if (supabaseUrl && supabaseKey) {
+if (!supabase && supabaseUrl && supabaseKey) {
   supabase = createClient(supabaseUrl, supabaseKey);
-} else {
-  console.warn("⚠️ Supabase env vars missing");
+  globalThis.__supabase = supabase;
+}
+
+if (!supabase) {
+  console.warn("⚠️ Supabase not initialized (missing env vars)");
 }
 
 // ===============================
@@ -35,7 +39,7 @@ export async function loadInitialQueue(org_id) {
       return [];
     }
 
-    return data || [];
+    return data ?? [];
   } catch (err) {
     console.error("Queue crash:", err);
     return [];
@@ -52,14 +56,12 @@ export function subscribeToQueue(org_id, callback) {
 
   channel
     .on("broadcast", { event: "lead_assigned" }, (payload) => {
-      if (payload?.payload?.org_id === org_id) {
-        callback(payload.payload);
-      }
+      const data = payload?.payload;
+      if (data?.org_id === org_id) callback(data);
     })
     .on("broadcast", { event: "lead_updated" }, (payload) => {
-      if (payload?.payload?.org_id === org_id) {
-        callback(payload.payload);
-      }
+      const data = payload?.payload;
+      if (data?.org_id === org_id) callback(data);
     })
     .subscribe();
 
@@ -70,7 +72,6 @@ export function subscribeToQueue(org_id, callback) {
 // CLEANUP
 // ===============================
 export function unsubscribeQueue(channel) {
-  if (supabase && channel) {
-    supabase.removeChannel(channel);
-  }
+  if (!supabase || !channel) return;
+  supabase.removeChannel(channel);
 }
