@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
 // ===============================
-// ENV VALIDATION (FAIL FAST)
+// ENV VALIDATION
 // ===============================
 const required = [
   "STRIPE_SECRET_KEY",
@@ -31,7 +31,7 @@ const supabase = createClient(
 );
 
 // ===============================
-// PRICING (CENT-BASED SAFETY)
+// PRICING (CENT BASED)
 // ===============================
 const PLANS = Object.freeze({
   starter: 9900,
@@ -42,17 +42,15 @@ const PLANS = Object.freeze({
 // ===============================
 // HELPERS
 // ===============================
-const normalizeEmail = (email = "") =>
-  email.trim().toLowerCase();
+const normalizeEmail = (e = "") => e.trim().toLowerCase();
 
 const sha = (v) =>
   crypto.createHash("sha256").update(v).digest("hex");
 
-const buildKey = (email, plan) =>
-  sha(`${email}:${plan}`);
+const buildKey = (email, plan) => sha(`${email}:${plan}`);
 
 // ===============================
-// 🚨 RATE LIMIT (HARD PROTECTION)
+// RATE LIMIT (SAFE FAIL OPEN)
 // ===============================
 async function rateLimit(email) {
   const windowStart = new Date(Date.now() - 5 * 60 * 1000);
@@ -64,45 +62,39 @@ async function rateLimit(email) {
     .gte("created_at", windowStart.toISOString());
 
   if (error) {
-    console.error("rateLimit error:", error);
-    return { allowed: true }; // fail open
+    console.warn("rateLimit fallback:", error.message);
+    return { allowed: true };
   }
 
-  if ((count || 0) >= 12) {
-    return { allowed: false, reason: "blocked" };
-  }
+  const c = count || 0;
 
-  if ((count || 0) >= 6) {
-    return { allowed: false, reason: "cooldown" };
-  }
+  if (c >= 12) return { allowed: false, reason: "blocked" };
+  if (c >= 6) return { allowed: false, reason: "cooldown" };
 
   return { allowed: true };
 }
 
 // ===============================
-// 🔐 CHECKOUT LOCK (RACE SAFE)
+// LOCK (ATOMIC SAFETY IMPROVED)
 // ===============================
 async function acquireLock(key, email, plan) {
-  const now = new Date();
+  const now = new Date().toISOString();
+  const expires = new Date(Date.now() + 25 * 60 * 1000).toISOString();
 
-  const { data, error } = await supabase
+  const { data: existing } = await supabase
     .from("checkout_locks")
-    .select("*")
+    .select("status, expires_at")
     .eq("id", key)
     .maybeSingle();
 
-  if (error) throw error;
-
-  // active lock still valid
   if (
-    data?.status === "active" &&
-    new Date(data.expires_at) > now
+    existing?.status === "active" &&
+    new Date(existing.expires_at) > new Date()
   ) {
     return { allowed: false };
   }
 
-  // upsert lock
-  const { error: upsertError } = await supabase
+  const { error } = await supabase
     .from("checkout_locks")
     .upsert(
       {
@@ -110,21 +102,19 @@ async function acquireLock(key, email, plan) {
         email,
         plan,
         status: "active",
-        created_at: now.toISOString(),
-        expires_at: new Date(
-          Date.now() + 25 * 60 * 1000
-        ).toISOString(),
+        created_at: now,
+        expires_at: expires,
       },
       { onConflict: "id" }
     );
 
-  if (upsertError) throw upsertError;
+  if (error) throw error;
 
   return { allowed: true };
 }
 
 // ===============================
-// 🧹 CLEANUP (NON-BLOCKING)
+// CLEANUP (NON-BLOCKING)
 // ===============================
 function expireOldLocks() {
   supabase
@@ -137,13 +127,14 @@ function expireOldLocks() {
 }
 
 // ===============================
-// MAIN CHECKOUT ROUTE
+// MAIN
 // ===============================
 export async function POST(req) {
   try {
     const { plan, email } = await req.json();
 
     const cleanEmail = normalizeEmail(email);
+    const amount = PLANS[plan];
 
     // ===============================
     // VALIDATION
@@ -154,8 +145,6 @@ export async function POST(req) {
         { status: 400 }
       );
     }
-
-    const amount = PLANS[plan];
 
     if (!amount) {
       return Response.json(
@@ -173,12 +162,7 @@ export async function POST(req) {
 
     if (!limit.allowed) {
       return Response.json(
-        {
-          error:
-            limit.reason === "blocked"
-              ? "Too many attempts (blocked)"
-              : "Too many attempts (cooldown)",
-        },
+        { error: limit.reason || "rate_limited" },
         { status: 429 }
       );
     }
@@ -189,7 +173,7 @@ export async function POST(req) {
     const checkoutKey = buildKey(cleanEmail, plan);
 
     // ===============================
-    // LOCK CHECK
+    // LOCK
     // ===============================
     const lock = await acquireLock(
       checkoutKey,
@@ -199,13 +183,13 @@ export async function POST(req) {
 
     if (!lock.allowed) {
       return Response.json(
-        { error: "Checkout already in progress" },
+        { error: "checkout_in_progress" },
         { status: 409 }
       );
     }
 
     // ===============================
-    // STRIPE SESSION (SAFE + IDEMPOTENT)
+    // STRIPE SESSION (HARDENED)
     // ===============================
     const session = await stripe.checkout.sessions.create(
       {
@@ -242,7 +226,7 @@ export async function POST(req) {
     );
 
     // ===============================
-    // NON-BLOCKING LOGGING
+    // LOGGING (NON-BLOCKING)
     // ===============================
     supabase.from("checkout_attempts").insert({
       email: cleanEmail,
@@ -266,13 +250,14 @@ export async function POST(req) {
       url: session.url,
       checkoutKey,
       amount,
+      status: "pending_payment"
     });
 
   } catch (err) {
     console.error("❌ Checkout crash:", err);
 
     return Response.json(
-      { error: "Checkout failed" },
+      { error: "checkout_failed" },
       { status: 500 }
     );
   }
