@@ -1,23 +1,38 @@
+// =====================
+// CONFIG
+// =====================
 const API = process.env.NEXT_PUBLIC_API_URL;
+
+if (!API) {
+  throw new Error("Missing NEXT_PUBLIC_API_URL");
+}
+
+// remove trailing slash to prevent double slashes
+const BASE_URL = API.replace(/\/$/, "");
+
+// =====================
+// TOKEN HELPERS
+// =====================
+function getToken() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("token");
+}
 
 // =====================
 // CORE FETCH WRAPPER
 // =====================
 async function apiFetch(path, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("token")
-        : null;
+    const token = getToken();
 
-    const res = await fetch(`${API}${path}`, {
+    const res = await fetch(`${BASE_URL}${path}`, {
       method: options.method || "GET",
       headers: {
         "Content-Type": "application/json",
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
       body: options.body,
@@ -27,33 +42,29 @@ async function apiFetch(path, options = {}) {
 
     clearTimeout(timeout);
 
-    const contentType = res.headers.get("content-type");
+    const isJson = res.headers
+      .get("content-type")
+      ?.includes("application/json");
 
-    let data;
-    if (contentType && contentType.includes("application/json")) {
-      data = await res.json();
-    } else {
-      data = await res.text();
-    }
+    const data = isJson ? await res.json() : await res.text();
 
     if (!res.ok) {
-      throw new Error(
-        data?.message || data || `Request failed (${res.status})`
-      );
+      const message =
+        (data && data.message) || data || `Request failed (${res.status})`;
+      throw new Error(message);
     }
 
     return data;
   } catch (err) {
     if (err.name === "AbortError") {
-      throw new Error("Request timeout — backend too slow");
+      throw new Error("Request timeout — server not responding");
     }
     throw err;
   }
 }
 
----
-
-# 🧩 LEADS
+// =====================
+// LEADS
 // =====================
 export function createLead(payload) {
   return apiFetch("/api/leads", {
@@ -66,9 +77,8 @@ export function getLeads() {
   return apiFetch("/api/leads");
 }
 
----
-
-# 🤖 AI SCORING
+// =====================
+// AI SCORING
 // =====================
 export function scoreLead(payload) {
   return apiFetch("/api/score", {
@@ -77,9 +87,8 @@ export function scoreLead(payload) {
   });
 }
 
----
-
-# 💳 PAYMENTS (Stripe)
+// =====================
+// STRIPE
 // =====================
 export function createCheckoutSession(payload) {
   return apiFetch("/api/payments/create-session", {
@@ -88,9 +97,8 @@ export function createCheckoutSession(payload) {
   });
 }
 
----
-
-# 🧠 HEALTH / DEBUG
+// =====================
+// HEALTH CHECK
 // =====================
 export function checkHealth() {
   return apiFetch("/health");
