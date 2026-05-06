@@ -4,7 +4,6 @@
   "description": "RoofFlow AI backend - leads, Stripe billing, Supabase integration",
 
   "main": "server.js",
-
   "type": "commonjs",
 
   "engines": {
@@ -29,7 +28,8 @@
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
     "stripe": "^16.0.0",
-    "crypto": "^1.0.1"
+
+    "ws": "^8.18.0"
   },
 
   "devDependencies": {
