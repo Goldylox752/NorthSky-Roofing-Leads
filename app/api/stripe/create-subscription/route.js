@@ -2,9 +2,9 @@ import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
-// ===============================
-// ENV VALIDATION
-// ===============================
+/* ===============================
+   ENV CHECK
+=============================== */
 const required = [
   "STRIPE_SECRET_KEY",
   "SUPABASE_URL",
@@ -12,15 +12,15 @@ const required = [
   "FRONTEND_URL",
 ];
 
-for (const key of required) {
-  if (!process.env[key]) {
-    throw new Error(`Missing ENV: ${key}`);
+for (const k of required) {
+  if (!process.env[k]) {
+    throw new Error(`Missing ENV: ${k}`);
   }
 }
 
-// ===============================
-// INIT
-// ===============================
+/* ===============================
+   INIT
+=============================== */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
 });
@@ -30,41 +30,40 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ===============================
-// PRICING (CENT BASED)
-// ===============================
-const PLANS = Object.freeze({
+/* ===============================
+   PRICING
+=============================== */
+const PLANS = {
   starter: 9900,
   growth: 19900,
   elite: 49900,
-});
+};
 
-// ===============================
-// HELPERS
-// ===============================
-const normalizeEmail = (e = "") => e.trim().toLowerCase();
+/* ===============================
+   HELPERS
+=============================== */
+const normalizeEmail = (e = "") =>
+  e.trim().toLowerCase();
 
-const sha = (v) =>
+const hash = (v) =>
   crypto.createHash("sha256").update(v).digest("hex");
 
-const buildKey = (email, plan) => sha(`${email}:${plan}`);
+const key = (email, plan) =>
+  hash(`${email}:${plan}`);
 
-// ===============================
-// RATE LIMIT (SAFE FAIL OPEN)
-// ===============================
+/* ===============================
+   SAFE RATE LIMIT (FIXED)
+=============================== */
 async function rateLimit(email) {
-  const windowStart = new Date(Date.now() - 5 * 60 * 1000);
+  const since = new Date(Date.now() - 5 * 60 * 1000);
 
   const { count, error } = await supabase
     .from("checkout_attempts")
     .select("*", { count: "exact", head: true })
     .eq("email", email)
-    .gte("created_at", windowStart.toISOString());
+    .gte("created_at", since.toISOString());
 
-  if (error) {
-    console.warn("rateLimit fallback:", error.message);
-    return { allowed: true };
-  }
+  if (error) return { allowed: true };
 
   const c = count || 0;
 
@@ -74,61 +73,36 @@ async function rateLimit(email) {
   return { allowed: true };
 }
 
-// ===============================
-// LOCK (ATOMIC SAFETY IMPROVED)
-// ===============================
-async function acquireLock(key, email, plan) {
-  const now = new Date().toISOString();
-  const expires = new Date(Date.now() + 25 * 60 * 1000).toISOString();
-
-  const { data: existing } = await supabase
-    .from("checkout_locks")
-    .select("status, expires_at")
-    .eq("id", key)
-    .maybeSingle();
-
-  if (
-    existing?.status === "active" &&
-    new Date(existing.expires_at) > new Date()
-  ) {
-    return { allowed: false };
-  }
+/* ===============================
+   ATOMIC LOCK (FIXED)
+=============================== */
+async function acquireLock(id, email, plan) {
+  const expires = new Date(Date.now() + 25 * 60 * 1000);
 
   const { error } = await supabase
     .from("checkout_locks")
     .upsert(
       {
-        id: key,
+        id,
         email,
         plan,
         status: "active",
-        created_at: now,
-        expires_at: expires,
+        expires_at: expires.toISOString(),
+        created_at: new Date().toISOString(),
       },
       { onConflict: "id" }
     );
 
-  if (error) throw error;
+  if (error) {
+    return { allowed: false };
+  }
 
   return { allowed: true };
 }
 
-// ===============================
-// CLEANUP (NON-BLOCKING)
-// ===============================
-function expireOldLocks() {
-  supabase
-    .from("checkout_locks")
-    .update({ status: "expired" })
-    .lt("expires_at", new Date().toISOString())
-    .eq("status", "active")
-    .then(() => {})
-    .catch(() => {});
-}
-
-// ===============================
-// MAIN
-// ===============================
+/* ===============================
+   HANDLER
+=============================== */
 export async function POST(req) {
   try {
     const { plan, email } = await req.json();
@@ -136,12 +110,9 @@ export async function POST(req) {
     const cleanEmail = normalizeEmail(email);
     const amount = PLANS[plan];
 
-    // ===============================
-    // VALIDATION
-    // ===============================
     if (!plan || !cleanEmail) {
       return Response.json(
-        { error: "Missing plan or email" },
+        { error: "Missing input" },
         { status: 400 }
       );
     }
@@ -153,28 +124,26 @@ export async function POST(req) {
       );
     }
 
-    expireOldLocks();
+    /* =======================
+       RATE LIMIT
+    ======================= */
+    const rl = await rateLimit(cleanEmail);
 
-    // ===============================
-    // RATE LIMIT
-    // ===============================
-    const limit = await rateLimit(cleanEmail);
-
-    if (!limit.allowed) {
+    if (!rl.allowed) {
       return Response.json(
-        { error: limit.reason || "rate_limited" },
+        { error: rl.reason },
         { status: 429 }
       );
     }
 
-    // ===============================
-    // IDEMPOTENCY KEY
-    // ===============================
-    const checkoutKey = buildKey(cleanEmail, plan);
+    /* =======================
+       IDEMPOTENCY KEY
+    ======================= */
+    const checkoutKey = key(cleanEmail, plan);
 
-    // ===============================
-    // LOCK
-    // ===============================
+    /* =======================
+       LOCK
+    ======================= */
     const lock = await acquireLock(
       checkoutKey,
       cleanEmail,
@@ -183,20 +152,18 @@ export async function POST(req) {
 
     if (!lock.allowed) {
       return Response.json(
-        { error: "checkout_in_progress" },
+        { error: "checkout_locked" },
         { status: 409 }
       );
     }
 
-    // ===============================
-    // STRIPE SESSION (HARDENED)
-    // ===============================
+    /* =======================
+       STRIPE SESSION
+    ======================= */
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
         customer_email: cleanEmail,
-
-        payment_method_types: ["card"],
 
         line_items: [
           {
@@ -217,7 +184,7 @@ export async function POST(req) {
         metadata: {
           plan,
           email: cleanEmail,
-          checkout_key: checkoutKey,
+          key: checkoutKey,
         },
       },
       {
@@ -225,36 +192,23 @@ export async function POST(req) {
       }
     );
 
-    // ===============================
-    // LOGGING (NON-BLOCKING)
-    // ===============================
+    /* =======================
+       LOG (NON-BLOCKING)
+    ======================= */
     supabase.from("checkout_attempts").insert({
       email: cleanEmail,
       plan,
       created_at: new Date().toISOString(),
     }).catch(() => {});
 
-    supabase.from("events").insert({
-      type: "checkout.created",
-      email: cleanEmail,
-      plan,
-      stripe_session_id: session.id,
-      checkout_key: checkoutKey,
-      created_at: new Date().toISOString(),
-    }).catch(() => {});
-
-    // ===============================
-    // RESPONSE
-    // ===============================
     return Response.json({
       url: session.url,
-      checkoutKey,
+      plan,
       amount,
-      status: "pending_payment"
     });
 
   } catch (err) {
-    console.error("❌ Checkout crash:", err);
+    console.error("Checkout error:", err);
 
     return Response.json(
       { error: "checkout_failed" },
