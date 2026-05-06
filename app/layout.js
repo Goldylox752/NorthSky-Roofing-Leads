@@ -2,16 +2,16 @@ import Sidebar from "@/components/Sidebar";
 import { createClient } from "@supabase/supabase-js";
 
 // ===============================
-// SUPABASE SERVER CLIENT
+// SAFE SERVER CLIENT (READ ONLY)
 // ===============================
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
 export default async function RootLayout({ children }) {
   // ===============================
-  // AUTH SESSION (SERVER-SIDE SAFE)
+  // DEFAULT USER STATE
   // ===============================
   let user = {
     role: "viewer",
@@ -19,12 +19,12 @@ export default async function RootLayout({ children }) {
   };
 
   try {
+    // NOTE: This only works if you use Supabase auth properly in server context
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
 
     if (authUser) {
-      // fetch role from your contractors table
       const { data: contractor } = await supabase
         .from("contractors")
         .select("role, name")
@@ -33,11 +33,11 @@ export default async function RootLayout({ children }) {
 
       user = {
         role: contractor?.role || "contractor",
-        name: contractor?.name || "User",
+        name: contractor?.name || authUser.email || "User",
       };
     }
   } catch (err) {
-    console.error("Auth load failed:", err);
+    console.error("Auth load failed:", err.message);
   }
 
   // ===============================
@@ -47,12 +47,9 @@ export default async function RootLayout({ children }) {
     <html lang="en">
       <body style={styles.body}>
         <div style={styles.shell}>
-          {/* SIDEBAR (ROLE-DRIVEN NAV) */}
           <Sidebar role={user.role} />
 
-          {/* MAIN AREA */}
           <main style={styles.main}>
-            {/* TOP BAR */}
             <header style={styles.topbar}>
               <div>
                 <h3 style={{ margin: 0 }}>RoofFlow OS</h3>
@@ -62,7 +59,6 @@ export default async function RootLayout({ children }) {
               </div>
             </header>
 
-            {/* PAGE CONTENT */}
             <div style={styles.content}>{children}</div>
           </main>
         </div>
