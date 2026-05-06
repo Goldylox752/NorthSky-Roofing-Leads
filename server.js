@@ -13,7 +13,7 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 
 /* ===============================
-   ENV VALIDATION (SAFE MODE)
+   ENV VALIDATION
 ================================ */
 const REQUIRED_ENV = [
   "STRIPE_SECRET_KEY",
@@ -23,21 +23,25 @@ const REQUIRED_ENV = [
   "FRONTEND_URL",
 ];
 
-const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
 
-if (missingEnv.length) {
-  console.error("❌ Missing ENV:", missingEnv);
+if (missing.length) {
+  console.error("❌ Missing ENV:", missing);
   process.exit(1);
 }
 
 /* ===============================
-   INIT CLIENTS
+   INIT CLIENTS (REST ONLY)
+   ⚠️ NO REALTIME USAGE HERE
 ================================ */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: { persistSession: false },
+  }
 );
 
 /* ===============================
@@ -53,17 +57,19 @@ app.use(
 );
 
 /* ===============================
-   RATE LIMITING
+   GLOBAL RATE LIMIT
 ================================ */
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-  })
-);
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(globalLimiter);
 
 /* ===============================
-   WEBHOOK (RAW BODY MUST BE FIRST)
+   WEBHOOK (MUST BE RAW FIRST)
 ================================ */
 app.post(
   "/api/stripe/webhook",
@@ -94,7 +100,7 @@ app.post(
 
         if (event.type === "checkout.session.completed") {
           const session = event.data.object;
-          const leadId = session.metadata?.leadId;
+          const leadId = session?.metadata?.leadId;
 
           if (leadId) {
             await supabase
@@ -108,16 +114,16 @@ app.post(
         }
       }
 
-      res.json({ received: true });
+      return res.json({ received: true });
     } catch (err) {
       console.error("❌ Webhook error:", err.message);
-      res.status(400).send("Webhook Error");
+      return res.status(400).send("Webhook Error");
     }
   }
 );
 
 /* ===============================
-   JSON BODY PARSER
+   JSON PARSER (AFTER WEBHOOK)
 ================================ */
 app.use(express.json({ limit: "1mb" }));
 
@@ -147,7 +153,7 @@ const LEAD_STATUS = {
 };
 
 /* ===============================
-   HEALTH CHECK
+   HEALTH
 ================================ */
 app.get("/", (req, res) => res.send("OK"));
 app.get("/health", (req, res) => res.json({ status: "ok" }));
@@ -157,7 +163,7 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 ================================ */
 app.post("/api/leads", async (req, res) => {
   try {
-    const { name, email, phone, city } = req.body;
+    const { name, email, phone, city } = req.body || {};
 
     if (!email && !phone) {
       return res.status(400).json({
@@ -205,13 +211,13 @@ app.post("/api/leads", async (req, res) => {
 
     if (error) throw error;
 
-    res.json({
+    return res.json({
       success: true,
       lead: data,
     });
   } catch (err) {
     console.error("❌ Lead error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Server error",
     });
@@ -226,7 +232,7 @@ app.post(
   rateLimit({ windowMs: 60 * 1000, max: 10 }),
   async (req, res) => {
     try {
-      const { leadId, amount } = req.body;
+      const { leadId, amount } = req.body || {};
 
       if (!leadId || !amount) {
         return res.status(400).json({
@@ -255,13 +261,13 @@ app.post(
         metadata: { leadId },
       });
 
-      res.json({
+      return res.json({
         success: true,
         url: session.url,
       });
     } catch (err) {
       console.error("❌ Checkout error:", err);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Checkout failed",
       });
@@ -280,7 +286,7 @@ app.use((req, res) => {
 });
 
 /* ===============================
-   GLOBAL ERROR HANDLER
+   ERROR HANDLER
 ================================ */
 app.use((err, req, res, next) => {
   console.error("🔥 Server error:", err);
@@ -291,7 +297,7 @@ app.use((err, req, res, next) => {
 });
 
 /* ===============================
-   START SERVER
+   START
 ================================ */
 const PORT = process.env.PORT || 3000;
 
