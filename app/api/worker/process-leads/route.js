@@ -10,9 +10,10 @@ import { supabase } from "@/lib/supabase";
 export const runtime = "nodejs";
 
 // =====================
-// CONFIG (ADAPTIVE READY)
+// CONFIG
 // =====================
 const BASE_CONCURRENCY = 5;
+const MAX_CONCURRENCY = 12;
 const MAX_RETRIES = 3;
 const BATCH_SIZE = 20;
 
@@ -21,78 +22,86 @@ const WORKER_ID =
   `worker_${Math.random().toString(36).slice(2, 10)}`;
 
 // =====================
-// 🧠 ADAPTIVE CONCURRENCY
+// SAFE RANDOM JITTER (ANTI THUNDERSNOW)
+// =====================
+const sleep = (ms) =>
+  new Promise((r) => setTimeout(r, ms + Math.random() * 50));
+
+// =====================
+// ADAPTIVE CONCURRENCY (HARDENED)
 // =====================
 async function getAdaptiveConcurrency() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("lead_queue_metrics")
     .select("queue_depth, failed_rate")
     .single();
 
-  const depth = data?.queue_depth || 0;
-  const failedRate = data?.failed_rate || 0;
+  if (error || !data) {
+    return BASE_CONCURRENCY;
+  }
 
-  if (depth > 200 && failedRate < 0.1) return 12;
-  if (depth > 100) return 8;
-  if (depth < 20) return 3;
+  const depth = data.queue_depth || 0;
+  const failedRate = data.failed_rate || 0;
+
+  if (depth > 300 && failedRate < 0.1) return MAX_CONCURRENCY;
+  if (depth > 150) return 8;
+  if (depth < 30) return 3;
 
   return BASE_CONCURRENCY;
 }
 
 // =====================
-// 💀 POISON LEAD DETECTION
+// POISON LEAD DETECTION
 // =====================
 function isPoisonLead(lead) {
-  return (
-    lead.attempts >= MAX_RETRIES ||
-    lead.status === "permanently_failed"
-  );
+  return lead.attempts >= MAX_RETRIES || lead.status === "failed_permanent";
 }
 
 // =====================
-// 🔐 ATOMIC CLAIM (STILL SOURCE OF TRUTH)
+// ATOMIC CLAIM (SAFE UNDER LOAD)
 // =====================
 async function claimLeads() {
-  const { data, error } = await supabase.rpc("claim_leads", {
-    worker_id: WORKER_ID,
-    batch_size: BATCH_SIZE,
-  });
+  try {
+    const { data, error } = await supabase.rpc("claim_leads", {
+      worker_id: WORKER_ID,
+      batch_size: BATCH_SIZE,
+    });
 
-  if (error) {
-    console.error("Claim error:", error.message);
+    if (error) {
+      console.error("claimLeads RPC error:", error.message);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error("claimLeads crash:", err.message);
     return [];
   }
-
-  return data || [];
 }
 
 // =====================
-// 📡 HEARTBEAT (DETECT STUCK WORKERS)
+// HEARTBEAT (WITH TIMESTAMP GUARD)
 // =====================
 async function heartbeat(count = 0) {
-  await supabase.from("worker_heartbeats").upsert({
-    worker_id: WORKER_ID,
-    last_seen: new Date().toISOString(),
-    processed_count: count,
-  });
+  try {
+    await supabase.from("worker_heartbeats").upsert({
+      worker_id: WORKER_ID,
+      last_seen: new Date().toISOString(),
+      processed_count: count,
+    });
+  } catch (err) {
+    console.error("heartbeat error:", err.message);
+  }
 }
 
 // =====================
-// PROCESS LEAD (HARDENED)
+// PROCESS LEAD (HARDENED CORE)
 // =====================
 async function processLead(lead) {
-  if (!lead?.id) {
-    return { ok: false, id: lead?.id, reason: "invalid" };
-  }
+  if (!lead?.id) return { ok: false, reason: "invalid" };
 
   if (isPoisonLead(lead)) {
-    await markLeadFailed(
-      lead.id,
-      "poison_lead",
-      MAX_RETRIES,
-      WORKER_ID
-    );
-
+    await markLeadFailed(lead.id, "poison_lead", MAX_RETRIES, WORKER_ID);
     return { ok: false, id: lead.id, reason: "poison" };
   }
 
@@ -103,18 +112,29 @@ async function processLead(lead) {
       return { ok: false, id: lead.id, reason: "locked" };
     }
 
-    // 🤖 AI SCORING (MAIN INTELLIGENCE LAYER)
-    const scored = await aiScoreLead(lead);
+    // 🤖 AI SCORING (with retry safety)
+    let scored = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        scored = await aiScoreLead(lead);
+        if (scored) break;
+      } catch (e) {
+        if (attempt === 2) throw e;
+        await sleep(100);
+      }
+    }
 
     if (!scored) {
-      throw new Error("AI scoring failed");
+      throw new Error("AI scoring returned null");
     }
 
     await markLeadDone(lead.id, scored, WORKER_ID);
 
     return { ok: true, id: lead.id };
+
   } catch (err) {
-    console.error(`[${WORKER_ID}] fail`, lead.id, err.message);
+    console.error(`[${WORKER_ID}] lead failed`, lead.id, err.message);
 
     await markLeadFailed(
       lead.id,
@@ -128,25 +148,28 @@ async function processLead(lead) {
 }
 
 // =====================
-// ⚡ PARALLEL WORK ENGINE
+// PARALLEL EXECUTION ENGINE (IMPROVED)
 // =====================
 async function runWorker(leads, concurrency) {
   let index = 0;
   const results = [];
 
-  async function worker() {
+  async function workerLoop() {
     while (true) {
       const i = index++;
       if (i >= leads.length) break;
 
       const res = await processLead(leads[i]);
       results.push(res);
+
+      // small jitter prevents DB spike collapse
+      await sleep(10);
     }
   }
 
   const workers = Array.from(
     { length: Math.min(concurrency, leads.length) },
-    () => worker()
+    workerLoop
   );
 
   await Promise.all(workers);
@@ -155,19 +178,23 @@ async function runWorker(leads, concurrency) {
 }
 
 // =====================
-// 📊 QUEUE METRICS UPDATE
+// METRICS (SAFE INSERT)
 // =====================
 async function updateMetrics(results) {
-  const total = results.length;
-  const failed = results.filter((r) => !r.ok).length;
+  try {
+    const total = results.length;
+    const failed = results.filter((r) => !r.ok).length;
 
-  await supabase.from("worker_metrics").insert({
-    worker_id: WORKER_ID,
-    total,
-    failed,
-    success: total - failed,
-    created_at: new Date().toISOString(),
-  });
+    await supabase.from("worker_metrics").insert({
+      worker_id: WORKER_ID,
+      total,
+      failed,
+      success: total - failed,
+      created_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("metrics error:", err.message);
+  }
 }
 
 // =====================
@@ -178,12 +205,11 @@ export async function GET() {
 
   try {
     const concurrency = await getAdaptiveConcurrency();
-
     const leads = await claimLeads();
 
-    if (!leads.length) {
-      await heartbeat(0);
+    await heartbeat(0);
 
+    if (!leads.length) {
       return Response.json({
         ok: true,
         worker: WORKER_ID,
@@ -207,7 +233,7 @@ export async function GET() {
     const duration = Date.now() - start;
 
     console.log(
-      `✅ ${WORKER_ID} done ${processed}/${leads.length} in ${duration}ms`
+      `✅ ${WORKER_ID} finished ${processed}/${leads.length} in ${duration}ms`
     );
 
     return Response.json({
@@ -219,8 +245,11 @@ export async function GET() {
       concurrency,
       duration_ms: duration,
     });
+
   } catch (err) {
     console.error("❌ worker crash:", err);
+
+    await heartbeat(0);
 
     return Response.json(
       {
