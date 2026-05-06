@@ -4,9 +4,19 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 // ===============================
+// ENV VALIDATION
+// ===============================
+if (!process.env.STRIPE_SECRET_KEY) throw new Error("Missing STRIPE_SECRET_KEY");
+if (!process.env.STRIPE_WEBHOOK_SECRET) throw new Error("Missing STRIPE_WEBHOOK_SECRET");
+if (!process.env.SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+
+// ===============================
 // INIT
 // ===============================
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2024-06-20",
+});
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -14,14 +24,19 @@ const supabase = createClient(
 );
 
 // ===============================
-// 🔐 IDEMPOTENCY CHECK (FIXED)
+// IDEMPOTENCY
 // ===============================
 async function getEvent(eventId) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("stripe_events")
     .select("id, status")
     .eq("id", eventId)
     .maybeSingle();
+
+  if (error) {
+    console.error("getEvent error:", error);
+    return null;
+  }
 
   return data;
 }
@@ -36,37 +51,39 @@ async function createEventLock(event) {
       locked_at: new Date().toISOString(),
     });
 
-  // if already exists → treat as duplicate safely
-  if (error && error.code === "23505") {
-    return { duplicate: true };
+  if (error) {
+    // duplicate = already processing or processed
+    if (error.code === "23505") {
+      return { duplicate: true };
+    }
+
+    throw error;
   }
 
   return { duplicate: false };
 }
 
-// ===============================
-// FINALIZE STATE
-// ===============================
-async function finalize(eventId, status, error = null) {
-  await supabase
+async function finalize(eventId, status, err = null) {
+  const { error } = await supabase
     .from("stripe_events")
     .update({
       status,
       processed_at: new Date().toISOString(),
-      error: error?.message || null,
+      error: err?.message || null,
     })
     .eq("id", eventId);
+
+  if (error) {
+    console.error("finalize error:", error);
+  }
 }
 
 // ===============================
-// STRIPE EVENT HANDLER
+// EVENT HANDLER
 // ===============================
 async function handleEvent(event) {
   switch (event.type) {
 
-    // ===============================
-    // PAYMENT SUCCESS
-    // ===============================
     case "checkout.session.completed": {
       const session = event.data.object;
 
@@ -75,7 +92,10 @@ async function handleEvent(event) {
       const subscriptionId = session.subscription;
       const city = session.metadata?.city;
 
-      if (!email) return;
+      if (!email) {
+        console.warn("No email on session");
+        return;
+      }
 
       const { data: contractor, error } = await supabase
         .from("contractors")
@@ -95,7 +115,6 @@ async function handleEvent(event) {
 
       if (error) throw error;
 
-      // log event (lightweight)
       await supabase.from("events").insert({
         type: "stripe.checkout.completed",
         contractor_id: contractor.id,
@@ -105,9 +124,6 @@ async function handleEvent(event) {
       break;
     }
 
-    // ===============================
-    // SUB UPDATED
-    // ===============================
     case "customer.subscription.updated": {
       const sub = event.data.object;
 
@@ -121,9 +137,6 @@ async function handleEvent(event) {
       break;
     }
 
-    // ===============================
-    // SUB DELETED
-    // ===============================
     case "customer.subscription.deleted": {
       const sub = event.data.object;
 
@@ -137,20 +150,27 @@ async function handleEvent(event) {
 
       break;
     }
+
+    default:
+      console.log("Unhandled event:", event.type);
   }
 }
 
 // ===============================
-// MAIN WEBHOOK
+// WEBHOOK
 // ===============================
 export async function POST(req) {
   let event;
 
   try {
-    const body = await req.text();
     const sig = req.headers.get("stripe-signature");
+    if (!sig) {
+      return new Response("Missing signature", { status: 400 });
+    }
 
-    // verify stripe signature
+    const body = await req.text();
+
+    // 🔐 VERIFY SIGNATURE
     event = stripe.webhooks.constructEvent(
       body,
       sig,
@@ -158,7 +178,7 @@ export async function POST(req) {
     );
 
     // ===============================
-    // IDEMPOTENCY GUARD (CLEAN VERSION)
+    // IDEMPOTENCY CHECK
     // ===============================
     const existing = await getEvent(event.id);
 
@@ -173,7 +193,7 @@ export async function POST(req) {
     }
 
     // ===============================
-    // PROCESS EVENT
+    // PROCESS
     // ===============================
     await handleEvent(event);
 
@@ -182,7 +202,7 @@ export async function POST(req) {
     return Response.json({ received: true });
 
   } catch (err) {
-    console.error("❌ Stripe webhook error:", err);
+    console.error("❌ Webhook error:", err);
 
     if (event?.id) {
       await finalize(event.id, "failed", err);
