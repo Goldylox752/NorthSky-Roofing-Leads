@@ -1,6 +1,6 @@
 {
   "name": "roof-flow-ai-backend",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "RoofFlow AI backend - lead marketplace, routing engine, Stripe billing, contractor network, realtime API",
 
   "main": "server.js",
@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "test": "echo \"No tests configured\"",
 
-    "postinstall": "node -e \"console.log('✔ Dependencies installed')\""
+    "postinstall": "node -e \"console.log('✔ Backend dependencies ready')\""
   },
 
   "dependencies": {
@@ -41,5 +41,8 @@
     "eslint": "^9.0.0",
     "nodemon": "^3.1.0",
     "prettier": "^3.3.0"
-  }
+  },
+
+  "optionalDependencies": {},
+  "private": true
 }
