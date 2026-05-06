@@ -1,4 +1,6 @@
 app.post("/api/leads", async (req, res) => {
+  const start = Date.now();
+
   try {
     const error = validateLead(req.body);
 
@@ -13,36 +15,54 @@ app.post("/api/leads", async (req, res) => {
     const { name, email, phone, city } = req.body;
 
     // =====================
-    // 🧠 IDEMPOTENCY KEY (PREVENT DUPLICATES)
+    // 🔐 IDEMPOTENCY KEY (GLOBAL SAFE)
     // =====================
     const idempotencyKey = crypto
       .createHash("sha256")
       .update(`${email || ""}:${phone || ""}:${city || ""}`)
       .digest("hex");
 
-    // =====================
-    // CREATE LEAD ID
-    // =====================
-    const leadId = crypto.randomUUID();
+    // 🔥 CHECK DB FIRST (CRITICAL FIX)
+    const existing = await supabase
+      .from("leads")
+      .select("id, status")
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+
+    if (existing?.data) {
+      return res.status(200).json({
+        success: true,
+        duplicate: true,
+        lead: existing.data,
+      });
+    }
 
     // =====================
-    // 🧠 LEAD SCORING ENGINE (MONEY PRIORITY)
+    // 🧠 IMPROVED SCORING ENGINE
     // =====================
-    let score = 50;
+    let score = 40;
 
-    if (email) score += 10;
-    if (phone) score += 20;
-    if (city) score += 10;
+    const signals = {
+      hasEmail: !!email,
+      hasPhone: !!phone,
+      hasCity: !!city,
+      fullIntent: !!(email && phone),
+      geoSignal: city === "Edmonton" || city === "Calgary",
+    };
 
-    if (phone && email) score += 10; // high intent
+    score += signals.hasEmail ? 10 : 0;
+    score += signals.hasPhone ? 15 : 0;
+    score += signals.hasCity ? 10 : 0;
+    score += signals.fullIntent ? 15 : 0;
+    score += signals.geoSignal ? 10 : 0;
 
     const tier =
-      score >= 80 ? "hot" :
-      score >= 60 ? "warm" :
+      score >= 85 ? "hot" :
+      score >= 65 ? "warm" :
       "cold";
 
     // =====================
-    // 💰 PRICING ENGINE (SCALABLE)
+    // 💰 SMART DYNAMIC PRICING ENGINE
     // =====================
     const basePrices = {
       Edmonton: 14900,
@@ -52,57 +72,74 @@ app.post("/api/leads", async (req, res) => {
 
     let price = basePrices[city] || basePrices.default;
 
-    if (tier === "hot") price += 2000;
-    if (tier === "cold") price -= 1000;
+    // demand-based adjustments
+    if (tier === "hot") price *= 1.25;
+    if (tier === "cold") price *= 0.85;
+
+    price = Math.round(price);
 
     // =====================
-    // 🧭 CONTRACTOR ROUTING HOOK (FUTURE SYSTEM)
+    // 🧭 REAL ROUTING (SUPABASE-READY)
     // =====================
+    const { data: contractor } = await supabase
+      .rpc("get_best_contractor", {
+        city_input: city || "default",
+        lead_score: score,
+      });
+
     const contractorId =
-      city === "Edmonton"
-        ? "contractor_edm_1"
-        : city === "Calgary"
-        ? "contractor_cal_1"
-        : "contractor_default";
+      contractor?.id || "unassigned";
 
     // =====================
-    // LEAD OBJECT
+    // 🧾 CREATE LEAD (ATOMIC + SAFE)
     // =====================
-    const lead = {
-      id: leadId,
-      name: name?.trim() || null,
-      email: email?.trim().toLowerCase() || null,
-      phone: phone?.trim() || null,
-      city: city?.trim() || null,
+    const { data: lead, error: insertError } = await supabase
+      .from("leads")
+      .insert({
+        id: crypto.randomUUID(),
 
-      status: "new",
-      tier,
-      score,
+        name: name?.trim() || null,
+        email: email?.trim().toLowerCase() || null,
+        phone: phone?.trim() || null,
+        city: city?.trim() || null,
 
-      contractorId,
+        status: "new",
+        tier,
+        score,
 
-      createdAt: new Date().toISOString(),
-      requestId: req.id,
-      idempotencyKey,
-    };
+        price,
+        contractor_id: contractorId,
+
+        idempotency_key: idempotencyKey,
+
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
 
     // =====================
-    // LOG (STRUCTURED EVENT)
+    // 📡 EVENT LOG (NON BLOCKING)
     // =====================
-    console.log("📩 LEAD_CREATED", {
-      leadId,
-      tier,
-      score,
-      city,
-      price,
-    });
+    supabase.from("events").insert({
+      lead_id: lead.id,
+      type: "lead_created",
+      payload: {
+        tier,
+        score,
+        price,
+        contractorId,
+      },
+    }).catch(() => {});
 
     // =====================
-    // 💰 RESPONSE (STRIPE READY FORMAT)
+    // 🧠 RESPONSE (STRIPE READY)
     // =====================
     return res.status(200).json({
       success: true,
-      message: "Lead created successfully",
 
       lead,
 
@@ -117,7 +154,7 @@ app.post("/api/leads", async (req, res) => {
         required: true,
         endpoint: "/api/checkout",
         payload: {
-          leadId,
+          leadId: lead.id,
           amount: price / 100,
           email,
         },
@@ -127,17 +164,11 @@ app.post("/api/leads", async (req, res) => {
         contractorId,
       },
 
-      nextStep: {
-        action: "checkout_required",
-        leadId,
-      },
+      latency_ms: Date.now() - start,
     });
 
   } catch (err) {
-    console.error("🔥 LEAD_ERROR", {
-      message: err.message,
-      stack: err.stack,
-    });
+    console.error("🔥 LEAD_ERROR", err);
 
     return res.status(500).json({
       success: false,
