@@ -1,0 +1,46 @@
+{
+  "name": "roof-flow-ai-backend",
+  "version": "1.4.0",
+  "description": "RoofFlow AI backend - lead marketplace, routing engine, Stripe billing, contractor network, realtime API",
+
+  "main": "server.js",
+  "type": "commonjs",
+
+  "engines": {
+    "node": "20.x"
+  },
+
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "prod": "NODE_ENV=production node server.js",
+
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "echo \"No tests configured\"",
+
+    "postinstall": "echo \"Dependencies installed successfully\""
+  },
+
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "openai": "^4.56.0",
+    "stripe": "^16.0.0",
+    "twilio": "^4.23.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8"
+  },
+
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "nodemon": "^3.1.0",
+    "prettier": "^3.3.0"
+  }
+}
