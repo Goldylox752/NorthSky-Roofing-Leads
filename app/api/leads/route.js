@@ -12,38 +12,47 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // =====================
-// BASIC SECURITY HEADERS (lightweight)
+// SECURITY HEADERS
 // =====================
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Powered-By", "none");
   next();
 });
 
 // =====================
-// CORS (tighten later)
+// CORS (safer default)
 // =====================
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: process.env.FRONTEND_URL || true,
     methods: ["GET", "POST"],
   })
 );
 
+// =====================
+// BODY PARSER (must be early)
+// =====================
 app.use(express.json({ limit: "1mb" }));
 
 // =====================
 // REQUEST ID + LOGGER
 // =====================
 app.use((req, res, next) => {
-  req.id = crypto.randomUUID();
+  const id =
+    req.headers["x-request-id"] ||
+    crypto.randomUUID();
+
+  req.id = id;
 
   console.log(
     JSON.stringify({
-      id: req.id,
+      id,
       time: new Date().toISOString(),
       method: req.method,
-      path: req.url,
+      path: req.originalUrl,
+      ip: req.ip,
     })
   );
 
@@ -51,29 +60,31 @@ app.use((req, res, next) => {
 });
 
 // =====================
-// SIMPLE IN-MEMORY RATE LIMIT
-// (upgrade to Redis later)
+// SIMPLE RATE LIMIT (IMPROVED)
 // =====================
 const ipHits = new Map();
 
 function rateLimit(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress;
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket.remoteAddress;
+
   const now = Date.now();
 
-  const data = ipHits.get(ip) || { count: 0, reset: now + 60000 };
+  let data = ipHits.get(ip);
 
-  if (now > data.reset) {
-    data.count = 0;
-    data.reset = now + 60000;
+  if (!data || now > data.reset) {
+    data = { count: 0, reset: now + 60_000 };
   }
 
-  data.count += 1;
+  data.count++;
   ipHits.set(ip, data);
 
   if (data.count > 30) {
     return res.status(429).json({
       success: false,
       error: "Too many requests",
+      requestId: req.id,
     });
   }
 
@@ -95,18 +106,26 @@ app.get("/health", (req, res) => {
 });
 
 // =====================
-// VALIDATION (STRONGER)
+// VALIDATION
 // =====================
 function validateLead(body) {
-  const { email, phone, name } = body;
+  const email = body.email?.trim();
+  const phone = body.phone?.trim();
+  const name = body.name?.trim();
 
   if (!email && !phone) return "Email or phone required";
 
-  if (email && !email.includes("@")) return "Invalid email";
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return "Invalid email";
+  }
 
-  if (phone && phone.length < 7) return "Invalid phone number";
+  if (phone && phone.length < 7) {
+    return "Invalid phone number";
+  }
 
-  if (name && name.length > 80) return "Name too long";
+  if (name && name.length > 80) {
+    return "Name too long";
+  }
 
   return null;
 }
@@ -128,9 +147,10 @@ app.post("/api/leads", async (req, res) => {
 
     const { name, email, phone, city } = req.body;
 
-    const leadId = `lead_${Date.now()}_${Math.floor(
-      Math.random() * 10000
-    )}`;
+    const leadId = crypto
+      .randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 18);
 
     const lead = {
       id: leadId,
@@ -143,14 +163,11 @@ app.post("/api/leads", async (req, res) => {
       requestId: req.id,
     };
 
-    // =====================
-    // LOG (structured)
-    // =====================
     console.log("📩 NEW_LEAD", lead);
 
     return res.status(200).json({
       success: true,
-      message: "Lead created",
+      message: "Lead created successfully",
       lead,
     });
 
@@ -175,7 +192,8 @@ app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: "Route not found",
-    path: req.url,
+    path: req.originalUrl,
+    requestId: req.id,
   });
 });
 
@@ -190,6 +208,19 @@ app.use((err, req, res, next) => {
     error: "Server crash handled safely",
     requestId: req.id,
   });
+});
+
+// =====================
+// GRACEFUL SHUTDOWN
+// =====================
+process.on("SIGTERM", () => {
+  console.log("🛑 SIGTERM received, shutting down gracefully...");
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  console.log("🛑 SIGINT received, shutting down...");
+  process.exit(0);
 });
 
 // =====================
