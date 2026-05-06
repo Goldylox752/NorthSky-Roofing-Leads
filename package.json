@@ -1,13 +1,13 @@
 {
   "name": "roof-flow-ai-backend",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "RoofFlow AI backend - lead marketplace, routing engine, Stripe billing, contractor network, realtime API",
 
   "main": "server.js",
   "type": "commonjs",
 
   "engines": {
-    "node": ">=18.17.0"
+    "node": "20.x"
   },
 
   "scripts": {
@@ -17,9 +17,9 @@
 
     "lint": "eslint .",
     "format": "prettier --write .",
-
     "test": "echo \"No tests configured yet\"",
 
+    "postinstall": "echo \"Dependencies installed\"",
     "vercel-build": "echo \"Render deployment only\""
   },
 
