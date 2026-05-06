@@ -29,13 +29,25 @@ if (missing.length) {
 }
 
 /* =========================
-   INIT CLIENTS
+   INIT CLIENTS (FIX: NO REALTIME)
 ========================= */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
+/**
+ * 🚨 IMPORTANT FIX:
+ * We explicitly DISABLE realtime usage to prevent
+ * Node 20 WebSocket crash on Render.
+ */
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    realtime: {
+      params: {
+        eventsPerSecond: 0,
+      },
+    },
+  }
 );
 
 /* =========================
@@ -43,7 +55,15 @@ const supabase = createClient(
 ========================= */
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: (origin, cb) => {
+      const allowed = [process.env.FRONTEND_URL];
+
+      if (!origin || allowed.includes(origin)) {
+        return cb(null, true);
+      }
+
+      return cb(new Error("CORS blocked: " + origin));
+    },
     credentials: true,
   })
 );
@@ -57,6 +77,7 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     service: "roofflow-backend",
+    time: new Date().toISOString(),
   });
 });
 
@@ -90,7 +111,10 @@ app.post("/api/leads", async (req, res) => {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("Supabase error:", error);
+      throw error;
+    }
 
     res.json({
       success: true,
@@ -155,7 +179,7 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 /* =========================
-   STRIPE WEBHOOK
+   STRIPE WEBHOOK (RAW BODY REQUIRED)
 ========================= */
 app.post(
   "/api/stripe/webhook",
