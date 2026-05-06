@@ -1,5 +1,8 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -9,53 +12,107 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // =====================
-// MIDDLEWARE
-// =====================
-app.use(cors({
-  origin: "*", // lock this later to your frontend domain
-  methods: ["GET", "POST"],
-}));
-
-app.use(express.json({ limit: "1mb" }));
-
-// =====================
-// REQUEST LOGGER (DEBUGGING)
+// BASIC SECURITY HEADERS (lightweight)
 // =====================
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
   next();
 });
 
 // =====================
-// HEALTH CHECK (RENDER + FRONTEND TEST)
+// CORS (tighten later)
+// =====================
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "*",
+    methods: ["GET", "POST"],
+  })
+);
+
+app.use(express.json({ limit: "1mb" }));
+
+// =====================
+// REQUEST ID + LOGGER
+// =====================
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID();
+
+  console.log(
+    JSON.stringify({
+      id: req.id,
+      time: new Date().toISOString(),
+      method: req.method,
+      path: req.url,
+    })
+  );
+
+  next();
+});
+
+// =====================
+// SIMPLE IN-MEMORY RATE LIMIT
+// (upgrade to Redis later)
+// =====================
+const ipHits = new Map();
+
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+
+  const data = ipHits.get(ip) || { count: 0, reset: now + 60000 };
+
+  if (now > data.reset) {
+    data.count = 0;
+    data.reset = now + 60000;
+  }
+
+  data.count += 1;
+  ipHits.set(ip, data);
+
+  if (data.count > 30) {
+    return res.status(429).json({
+      success: false,
+      error: "Too many requests",
+    });
+  }
+
+  next();
+}
+
+app.use(rateLimit);
+
+// =====================
+// HEALTH CHECK
 // =====================
 app.get("/health", (req, res) => {
-  res.status(200).json({
+  res.json({
     status: "ok",
     uptime: process.uptime(),
+    memory: process.memoryUsage(),
     timestamp: Date.now(),
   });
 });
 
 // =====================
-// LEAD VALIDATION
+// VALIDATION (STRONGER)
 // =====================
 function validateLead(body) {
-  const { email, phone } = body;
+  const { email, phone, name } = body;
 
-  if (!email && !phone) {
-    return "Email or phone required";
-  }
+  if (!email && !phone) return "Email or phone required";
 
-  if (phone && phone.length < 7) {
-    return "Invalid phone number";
-  }
+  if (email && !email.includes("@")) return "Invalid email";
+
+  if (phone && phone.length < 7) return "Invalid phone number";
+
+  if (name && name.length > 80) return "Name too long";
 
   return null;
 }
 
 // =====================
-// LEADS ENDPOINT (PRODUCTION SAFE)
+// LEADS ENDPOINT
 // =====================
 app.post("/api/leads", async (req, res) => {
   try {
@@ -65,58 +122,60 @@ app.post("/api/leads", async (req, res) => {
       return res.status(400).json({
         success: false,
         error,
+        requestId: req.id,
       });
     }
 
     const { name, email, phone, city } = req.body;
 
-    // =====================
-    // SIMULATED LEAD CREATION
-    // =====================
-    const leadId = `lead_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const leadId = `lead_${Date.now()}_${Math.floor(
+      Math.random() * 10000
+    )}`;
 
-    console.log("📩 Lead received:", {
-      leadId,
-      name,
-      email,
-      phone,
-      city,
-    });
+    const lead = {
+      id: leadId,
+      name: name || null,
+      email: email || null,
+      phone: phone || null,
+      city: city || null,
+      status: "new",
+      createdAt: new Date().toISOString(),
+      requestId: req.id,
+    };
 
     // =====================
-    // RESPONSE CONTRACT (IMPORTANT FOR FRONTEND)
+    // LOG (structured)
     // =====================
+    console.log("📩 NEW_LEAD", lead);
+
     return res.status(200).json({
       success: true,
-      message: "Lead created successfully",
-      lead: {
-        id: leadId,
-        name: name || null,
-        email: email || null,
-        phone: phone || null,
-        city: city || null,
-        status: "queued",
-        createdAt: new Date().toISOString(),
-      },
+      message: "Lead created",
+      lead,
     });
 
   } catch (err) {
-    console.error("🔥 Lead error:", err);
+    console.error("🔥 LEAD_ERROR", {
+      message: err.message,
+      stack: err.stack,
+    });
 
     return res.status(500).json({
       success: false,
       error: "Internal server error",
+      requestId: req.id,
     });
   }
 });
 
 // =====================
-// 404 HANDLER (IMPORTANT)
+// 404 HANDLER
 // =====================
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: "Route not found",
+    path: req.url,
   });
 });
 
@@ -124,11 +183,12 @@ app.use((req, res) => {
 // GLOBAL ERROR HANDLER
 // =====================
 app.use((err, req, res, next) => {
-  console.error("💥 Unhandled error:", err);
+  console.error("💥 UNHANDLED_ERROR", err);
 
   res.status(500).json({
     success: false,
-    error: "Server crashed safely",
+    error: "Server crash handled safely",
+    requestId: req.id,
   });
 });
 
