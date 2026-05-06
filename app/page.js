@@ -14,7 +14,10 @@ export default function Page() {
   const [success, setSuccess] = useState(false);
   const [leadId, setLeadId] = useState(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+  // ✅ SAFE fallback prevents broken deploy if env missing
+  const API_URL =
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://your-backend.onrender.com";
 
   const handleChange = (e) => {
     setForm((prev) => ({
@@ -49,7 +52,7 @@ export default function Page() {
         throw new Error(data.error || "Request failed");
       }
 
-      setLeadId(data.lead?.id || null);
+      setLeadId(data.lead?.id ?? null);
       setSuccess(true);
 
       setForm({
@@ -59,7 +62,8 @@ export default function Page() {
         city: "",
       });
     } catch (err) {
-      alert("Submission failed. Try again.");
+      console.error(err);
+      alert(err.message || "Submission failed. Try again.");
     } finally {
       setLoading(false);
     }
@@ -69,9 +73,7 @@ export default function Page() {
     <main style={styles.main}>
       <div style={styles.container}>
 
-        {/* =========================
-            HERO SECTION (HOOK STACK)
-        ========================= */}
+        {/* HERO */}
         <h1 style={styles.h1}>
           Exclusive Roofing Leads.<br />
           <span style={{ color: "#00ffb3" }}>
@@ -80,57 +82,60 @@ export default function Page() {
         </h1>
 
         <p style={styles.subtext}>
-          Stop paying for shared leads. Get real homeowners ready to hire —
-          delivered directly to your business.
+          Stop paying for shared leads. Get real homeowners ready to hire.
         </p>
 
-        {/* VALUE ANCHOR */}
         <div style={styles.priceTag}>
           Leads range: <b>$15 – $50 each</b>
         </div>
 
-        {/* TRUST / PROOF BAR */}
         <div style={styles.trustBar}>
-          ✔ Verified homeowners  
-          ✔ Real-time AI routing  
-          ✔ No shared leads  
-          ✔ Cancel anytime  
+          ✔ Verified homeowners ✔ AI routing ✔ No shared leads ✔ Cancel anytime
         </div>
 
-        {/* =========================
-            SUCCESS STATE
-        ========================= */}
+        {/* SUCCESS STATE */}
         {success ? (
           <div style={styles.successBox}>
             <h2>Application Received ✔</h2>
 
-            <p>
-              Your contractor profile is now in the approval queue.
-            </p>
+            <p>Your contractor profile is in review.</p>
 
             <p style={styles.meta}>
               Tracking ID: <b>{leadId}</b>
             </p>
 
             <p style={styles.nextSteps}>
-              Expect approval within 24 hours if your city is available.
+              Expect approval within 24 hours.
             </p>
           </div>
         ) : (
           <div style={styles.formBox}>
 
-            <h3 style={styles.formTitle}>
-              Get Exclusive Access
-            </h3>
+            <h3 style={styles.formTitle}>Get Exclusive Access</h3>
 
             <p style={styles.formSub}>
-              Join limited contractors per city before slots fill.
+              Limited contractors per city.
             </p>
 
-            <input name="name" placeholder="Full Name" value={form.name} onChange={handleChange} style={styles.input} />
-            <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
-            <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
-            <input name="city" placeholder="Service City" value={form.city} onChange={handleChange} style={styles.input} />
+            <input name="name" placeholder="Full Name"
+              value={form.name} onChange={handleChange}
+              style={styles.input}
+            />
+
+            <input name="email" placeholder="Email *"
+              value={form.email} onChange={handleChange}
+              style={styles.input}
+            />
+
+            <input name="phone" placeholder="Phone *"
+              value={form.phone} onChange={handleChange}
+              style={styles.input}
+            />
+
+            <input name="city" placeholder="Service City"
+              value={form.city} onChange={handleChange}
+              style={styles.input}
+            />
 
             <button
               onClick={handleSubmit}
@@ -140,48 +145,38 @@ export default function Page() {
                 opacity: loading ? 0.7 : 1,
               }}
             >
-              {loading
-                ? "Processing..."
-                : "Claim Your City Access"}
+              {loading ? "Processing..." : "Claim Your City Access"}
             </button>
 
             <p style={styles.micro}>
-              ⚡ Only 1–3 contractors allowed per city
+              ⚡ Only 1–3 contractors per city
             </p>
           </div>
         )}
 
-        {/* =========================
-            HOW IT WORKS (BIG CONVERSION BOOST)
-        ========================= */}
+        {/* VALUE SECTION */}
         <div style={styles.valueBox}>
           <h3>How RoofFlow Works</h3>
-
           <ol>
-            <li>Apply for your city access</li>
-            <li>Get approved within 24 hours</li>
-            <li>Receive exclusive homeowner leads</li>
-            <li>Pay only per lead ($15–$50)</li>
+            <li>Apply for city access</li>
+            <li>Get approved within 24h</li>
+            <li>Receive exclusive leads</li>
+            <li>Pay per lead only</li>
           </ol>
         </div>
 
-        {/* =========================
-            WHY IT CONVERTS SECTION
-        ========================= */}
         <div style={styles.valueBox}>
-          <h3>Why Contractors Switch to RoofFlow</h3>
-
+          <h3>Why Contractors Switch</h3>
           <ul>
-            <li>🔥 No more shared leads</li>
-            <li>💰 Pay only for real homeowners</li>
-            <li>📍 Territory exclusivity per city</li>
-            <li>⚡ AI-powered routing system</li>
+            <li>🔥 No shared leads</li>
+            <li>💰 Pay per real homeowner</li>
+            <li>📍 City exclusivity</li>
+            <li>⚡ AI routing system</li>
           </ul>
         </div>
 
-        {/* FINAL CTA (IMPORTANT) */}
         <div style={styles.finalCTA}>
-          Ready to dominate your city? Apply now before slots fill.
+          Ready to dominate your city? Apply now.
         </div>
 
       </div>
