@@ -1,6 +1,7 @@
-import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
+const router = require("express").Router();
+const Stripe = require("stripe");
+const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
 
 /* ===============================
    ENV CHECK
@@ -42,17 +43,15 @@ const PLANS = {
 /* ===============================
    HELPERS
 =============================== */
-const normalizeEmail = (e = "") =>
-  e.trim().toLowerCase();
+const normalizeEmail = (e = "") => e.trim().toLowerCase();
 
 const hash = (v) =>
   crypto.createHash("sha256").update(v).digest("hex");
 
-const key = (email, plan) =>
-  hash(`${email}:${plan}`);
+const key = (email, plan) => hash(`${email}:${plan}`);
 
 /* ===============================
-   SAFE RATE LIMIT (FIXED)
+   RATE LIMIT
 =============================== */
 async function rateLimit(email) {
   const since = new Date(Date.now() - 5 * 60 * 1000);
@@ -74,7 +73,7 @@ async function rateLimit(email) {
 }
 
 /* ===============================
-   ATOMIC LOCK (FIXED)
+   LOCK (prevent duplicates)
 =============================== */
 async function acquireLock(id, email, plan) {
   const expires = new Date(Date.now() + 25 * 60 * 1000);
@@ -93,35 +92,27 @@ async function acquireLock(id, email, plan) {
       { onConflict: "id" }
     );
 
-  if (error) {
-    return { allowed: false };
-  }
+  if (error) return { allowed: false };
 
   return { allowed: true };
 }
 
 /* ===============================
-   HANDLER
+   ROUTE
 =============================== */
-export async function POST(req) {
+router.post("/create", async (req, res) => {
   try {
-    const { plan, email } = await req.json();
+    const { plan, email } = req.body;
 
     const cleanEmail = normalizeEmail(email);
     const amount = PLANS[plan];
 
     if (!plan || !cleanEmail) {
-      return Response.json(
-        { error: "Missing input" },
-        { status: 400 }
-      );
+      return res.status(400).json({ error: "Missing input" });
     }
 
     if (!amount) {
-      return Response.json(
-        { error: "Invalid plan" },
-        { status: 400 }
-      );
+      return res.status(400).json({ error: "Invalid plan" });
     }
 
     /* =======================
@@ -130,10 +121,7 @@ export async function POST(req) {
     const rl = await rateLimit(cleanEmail);
 
     if (!rl.allowed) {
-      return Response.json(
-        { error: rl.reason },
-        { status: 429 }
-      );
+      return res.status(429).json({ error: rl.reason });
     }
 
     /* =======================
@@ -144,17 +132,10 @@ export async function POST(req) {
     /* =======================
        LOCK
     ======================= */
-    const lock = await acquireLock(
-      checkoutKey,
-      cleanEmail,
-      plan
-    );
+    const lock = await acquireLock(checkoutKey, cleanEmail, plan);
 
     if (!lock.allowed) {
-      return Response.json(
-        { error: "checkout_locked" },
-        { status: 409 }
-      );
+      return res.status(409).json({ error: "checkout_locked" });
     }
 
     /* =======================
@@ -193,7 +174,7 @@ export async function POST(req) {
     );
 
     /* =======================
-       LOG (NON-BLOCKING)
+       NON-BLOCKING LOG
     ======================= */
     supabase.from("checkout_attempts").insert({
       email: cleanEmail,
@@ -201,7 +182,7 @@ export async function POST(req) {
       created_at: new Date().toISOString(),
     }).catch(() => {});
 
-    return Response.json({
+    return res.json({
       url: session.url,
       plan,
       amount,
@@ -209,10 +190,8 @@ export async function POST(req) {
 
   } catch (err) {
     console.error("Checkout error:", err);
-
-    return Response.json(
-      { error: "checkout_failed" },
-      { status: 500 }
-    );
+    return res.status(500).json({ error: "checkout_failed" });
   }
-}
+});
+
+module.exports = router;
