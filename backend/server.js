@@ -1,6 +1,15 @@
 "use strict";
 
-require("dotenv").config();
+/* =========================
+   ENV (SAFE LOAD)
+========================= */
+if (process.env.NODE_ENV !== "production") {
+  try {
+    require("dotenv").config();
+  } catch (err) {
+    console.warn("⚠️ dotenv not installed (ok in production)");
+  }
+}
 
 const express = require("express");
 const cors = require("cors");
@@ -24,7 +33,7 @@ const required = [
 const missing = required.filter((k) => !process.env[k]);
 
 if (missing.length) {
-  console.error("❌ Missing ENV:", missing);
+  console.error("❌ Missing ENV variables:", missing);
   process.exit(1);
 }
 
@@ -39,15 +48,14 @@ const supabase = createClient(
 );
 
 /* =========================
-   SECURITY (CORS SAFE MODE)
+   CORS
 ========================= */
 app.use(
   cors({
     origin: (origin, cb) => {
       const allowed = [process.env.FRONTEND_URL];
 
-      // allow server-to-server / curl / Stripe
-      if (!origin) return cb(null, true);
+      if (!origin) return cb(null, true); // server-to-server / Stripe
 
       if (allowed.includes(origin)) return cb(null, true);
 
@@ -59,7 +67,7 @@ app.use(
 );
 
 /* =========================
-   WEBHOOK (RAW BODY FIRST)
+   STRIPE WEBHOOK (RAW BODY)
 ========================= */
 app.post(
   "/api/stripe/webhook",
@@ -78,9 +86,6 @@ app.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
-      // =========================
-      // PAYMENT SUCCESS HANDLER
-      // =========================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const leadId = session?.metadata?.leadId;
@@ -100,10 +105,10 @@ app.post(
         }
       }
 
-      return res.json({ received: true });
+      res.json({ received: true });
     } catch (err) {
       console.error("❌ Webhook error:", err.message);
-      return res.status(400).send("Webhook Error");
+      res.status(400).send("Webhook Error");
     }
   }
 );
@@ -163,13 +168,10 @@ app.post("/api/leads", async (req, res) => {
       });
     }
 
-    return res.json({
-      success: true,
-      lead: data,
-    });
+    res.json({ success: true, lead: data });
   } catch (err) {
     console.error("❌ Lead error:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Server error",
     });
@@ -210,13 +212,13 @@ app.post("/api/checkout", async (req, res) => {
       metadata: { leadId },
     });
 
-    return res.json({
+    res.json({
       success: true,
       url: session.url,
     });
   } catch (err) {
     console.error("❌ Checkout error:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Checkout failed",
     });
@@ -224,7 +226,7 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 /* =========================
-   404 HANDLER
+   404
 ========================= */
 app.use((req, res) => {
   res.status(404).json({
