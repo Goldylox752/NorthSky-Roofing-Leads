@@ -7,16 +7,24 @@ router.post(
     try {
       const sig = req.headers["stripe-signature"];
 
+      if (!sig) {
+        return res.status(400).send("Missing Stripe signature");
+      }
+
       event = stripe.webhooks.constructEvent(
         req.body,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
+      console.error("❌ Stripe signature error:", err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     try {
+      /* ===============================
+         IDEMPOTENCY LOCK (CRITICAL)
+      =============================== */
       const { data: existing } = await supabase
         .from("stripe_events")
         .select("id")
@@ -34,67 +42,118 @@ router.post(
         created_at: new Date().toISOString(),
       });
 
+      /* ===============================
+         EVENT HANDLER
+      =============================== */
       switch (event.type) {
 
+        /* =========================
+           PAYMENT SUCCESS
+        ========================= */
         case "checkout.session.completed": {
           const session = event.data.object;
 
           const email =
             session.customer_details?.email ||
-            session.customer_email ||
-            null;
+            session.customer_email;
 
-          if (!email) throw new Error("Missing email");
+          const leadId = session.metadata?.leadId;
+          const plan = session.metadata?.plan || "starter";
 
-          const { error } = await supabase.from("leads").upsert({
-            email,
-            plan: session.metadata?.plan || "starter",
-            paid: true,
-            stripe_customer_id: session.customer,
-          });
+          if (!email || !leadId) {
+            throw new Error("Missing required webhook data");
+          }
+
+          const { error } = await supabase
+            .from("leads")
+            .update({
+              email,
+              plan,
+              paid: true,
+              status: "paid",
+              stripe_customer_id: session.customer,
+              activated_at: new Date().toISOString(),
+            })
+            .eq("id", leadId);
 
           if (error) throw error;
 
+          console.log("✅ Payment confirmed:", email);
+
           break;
         }
 
+        /* =========================
+           SUBSCRIPTION UPDATED
+        ========================= */
         case "customer.subscription.updated": {
           const sub = event.data.object;
 
-          await supabase.from("leads").update({
-            subscription_status: sub.status,
-            plan: sub.items.data[0]?.price?.id || "pro",
-          }).eq("stripe_customer_id", sub.customer);
+          const plan =
+            sub.items?.data?.[0]?.price?.nickname ||
+            sub.items?.data?.[0]?.price?.id ||
+            "pro";
+
+          await supabase
+            .from("leads")
+            .update({
+              subscription_status: sub.status,
+              plan,
+            })
+            .eq("stripe_customer_id", sub.customer);
 
           break;
         }
 
+        /* =========================
+           SUBSCRIPTION CANCELED
+        ========================= */
         case "customer.subscription.deleted": {
           const sub = event.data.object;
 
-          await supabase.from("leads").update({
-            active: false,
-            plan: "free",
-          }).eq("stripe_customer_id", sub.customer);
+          await supabase
+            .from("leads")
+            .update({
+              active: false,
+              status: "canceled",
+              plan: "free",
+            })
+            .eq("stripe_customer_id", sub.customer);
 
           break;
         }
+
+        default:
+          console.log("Unhandled Stripe event:", event.type);
       }
 
-      await supabase.from("stripe_events").update({
-        status: "completed",
-        processed_at: new Date().toISOString(),
-      }).eq("id", event.id);
+      /* ===============================
+         MARK EVENT COMPLETE
+      =============================== */
+      await supabase
+        .from("stripe_events")
+        .update({
+          status: "completed",
+          processed_at: new Date().toISOString(),
+        })
+        .eq("id", event.id);
 
       return res.json({ received: true });
 
     } catch (err) {
-      await supabase.from("stripe_events").update({
-        status: "failed",
-        error: err.message,
-      }).eq("id", event.id);
+      console.error("❌ Webhook processing error:", err.message);
 
-      return res.status(500).json({ error: "Webhook failed" });
+      await supabase
+        .from("stripe_events")
+        .update({
+          status: "failed",
+          error: err.message,
+        })
+        .eq("id", event.id);
+
+      return res.status(500).json({
+        error: "Webhook failed",
+      });
     }
   }
 );
