@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 export default function SuccessPage() {
-  const [status, setStatus] = useState("verifying"); // verifying | active | error
+  const [status, setStatus] = useState("verifying");
   const [message, setMessage] = useState("");
+  const [email, setEmail] = useState("");
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -32,20 +33,22 @@ export default function SuccessPage() {
           `${API_URL}/api/stripe/verify-session`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id }),
           }
         );
 
         const data = await res.json();
 
-        if (!data.success) {
-          throw new Error(data.error || "Verification failed");
+        if (!res.ok || !data?.success) {
+          throw new Error(data?.error || "Verification failed");
         }
 
+        setEmail(data.email || "");
         setStatus("active");
+
+        // 🔥 store activation state locally (important for dashboard gating)
+        localStorage.setItem("isActive", "true");
       } catch (err) {
         console.error(err);
         setStatus("error");
@@ -65,7 +68,7 @@ export default function SuccessPage() {
         <div style={styles.card}>
           <h1 style={styles.title}>Verifying Payment...</h1>
           <p style={styles.text}>
-            Activating your contractor account in real time.
+            Confirming your activation with Stripe and syncing your account.
           </p>
         </div>
       </main>
@@ -79,7 +82,7 @@ export default function SuccessPage() {
     return (
       <main style={styles.container}>
         <div style={styles.card}>
-          <h1 style={styles.title}>⚠️ Something went wrong</h1>
+          <h1 style={styles.title}>Payment Verification Failed</h1>
           <p style={styles.text}>{message}</p>
 
           <div style={styles.actions}>
@@ -93,29 +96,31 @@ export default function SuccessPage() {
   }
 
   // =====================
-  // SUCCESS STATE (REAL ACTIVATION CONFIRMED)
+  // SUCCESS STATE
   // =====================
   return (
     <main style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>🎉 You're Activated</h1>
+        <h1 style={styles.title}>🎉 You're Live</h1>
 
         <p style={styles.text}>
-          Your contractor account is now live in the RoofFlow system.
+          Your contractor account is now active and receiving leads.
         </p>
 
-        <p style={styles.subtext}>
-          You will start receiving exclusive roofing leads as they come in.
-        </p>
+        {email && (
+          <p style={styles.subtext}>
+            Activated account: <b>{email}</b>
+          </p>
+        )}
 
         <div style={styles.statusBox}>
-          <p>✔ Stripe subscription confirmed</p>
-          <p>✔ Contractor activated in system</p>
-          <p>✔ Lead routing enabled</p>
+          <p>✔ Payment confirmed</p>
+          <p>✔ Account activated in system</p>
+          <p>✔ Lead delivery enabled</p>
         </div>
 
         <p style={styles.note}>
-          First leads may arrive within minutes depending on your city demand.
+          You may start receiving leads within minutes depending on demand in your area.
         </p>
 
         <div style={styles.actions}>
@@ -131,3 +136,73 @@ export default function SuccessPage() {
     </main>
   );
 }
+
+/* ===============================
+   STYLES (UNCHANGED BUT CLEANED)
+=============================== */
+const styles = {
+  container: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#0b0f19",
+    color: "#fff",
+    padding: 20,
+  },
+  card: {
+    maxWidth: 600,
+    width: "100%",
+    background: "#111827",
+    padding: 40,
+    borderRadius: 12,
+    textAlign: "center",
+  },
+  title: {
+    fontSize: 32,
+    marginBottom: 10,
+  },
+  text: {
+    fontSize: 16,
+    color: "#cbd5e1",
+  },
+  subtext: {
+    fontSize: 14,
+    color: "#94a3b8",
+    marginTop: 10,
+  },
+  statusBox: {
+    marginTop: 20,
+    textAlign: "left",
+    background: "#0f172a",
+    padding: 15,
+    borderRadius: 8,
+    fontSize: 14,
+  },
+  note: {
+    marginTop: 15,
+    fontSize: 12,
+    color: "#94a3b8",
+  },
+  actions: {
+    marginTop: 25,
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+  },
+  primaryBtn: {
+    background: "#22c55e",
+    padding: "12px 20px",
+    borderRadius: 8,
+    color: "#000",
+    textDecoration: "none",
+    fontWeight: "bold",
+  },
+  secondaryBtn: {
+    background: "#1f2937",
+    padding: "12px 20px",
+    borderRadius: 8,
+    color: "#fff",
+    textDecoration: "none",
+  },
+};
