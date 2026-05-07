@@ -23,7 +23,7 @@ const crypto = require("crypto");
 const app = express();
 
 /* =========================
-   BASIC HEALTH (NO DEPENDENCIES)
+   BASIC HEALTH
 ========================= */
 app.get("/health", (req, res) => {
   res.json({
@@ -34,8 +34,14 @@ app.get("/health", (req, res) => {
 });
 
 /* =========================
+   ROOT ROUTE (FIX YOU ASKED FOR)
+========================= */
+app.get("/", (req, res) => {
+  res.json({ status: "API running" });
+});
+
+/* =========================
    ENV CHECK (NON-FATAL)
-   → DO NOT CRASH SERVER
 ========================= */
 const requiredEnv = [
   "STRIPE_SECRET_KEY",
@@ -52,7 +58,7 @@ if (missing.length) {
 }
 
 /* =========================
-   INIT CLIENTS (ONLY IF VALID)
+   INIT CLIENTS
 ========================= */
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY)
@@ -77,7 +83,12 @@ app.use(
 );
 
 /* =========================
-   WEBHOOK (RAW BODY)
+   JSON BODY
+========================= */
+app.use(express.json({ limit: "1mb" }));
+
+/* =========================
+   WEBHOOK (Stripe RAW)
 ========================= */
 app.post(
   "/api/stripe/webhook",
@@ -119,17 +130,15 @@ app.post(
 );
 
 /* =========================
-   JSON BODY
-========================= */
-app.use(express.json({ limit: "1mb" }));
-
-/* =========================
    CREATE LEAD
 ========================= */
 app.post("/api/leads", async (req, res) => {
   try {
     if (!supabase) {
-      return res.status(500).json({ error: "Database not configured" });
+      return res.status(500).json({
+        error: "Database not configured",
+        hint: "Check SUPABASE_URL + SERVICE_ROLE_KEY in Render",
+      });
     }
 
     const { name, email, phone, city } = req.body;
@@ -209,7 +218,7 @@ app.post("/api/checkout", async (req, res) => {
 });
 
 /* =========================
-   404
+   404 HANDLER
 ========================= */
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
