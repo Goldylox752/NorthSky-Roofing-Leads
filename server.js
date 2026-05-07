@@ -2,17 +2,20 @@ require("dotenv").config();
 
 const app = require("./app");
 
-/* ===============================
-   PORT
-=============================== */
 const PORT = process.env.PORT || 3001;
 
 /* ===============================
-   START SERVER
+   START SERVER (SAFE)
 =============================== */
-app.listen(PORT, () => {
-  console.log(`
+try {
+  app.listen(PORT, () => {
+    console.log(`
 🚀 Server running
 🌎 Port: ${PORT}
-  `);
-});
+🟢 Health: http://localhost:${PORT}/health
+    `);
+  });
+} catch (err) {
+  console.error("❌ Failed to start server:", err);
+  process.exit(1);
+}
