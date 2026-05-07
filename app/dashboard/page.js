@@ -17,13 +17,15 @@ export default function Dashboard() {
       try {
         const email = localStorage.getItem("user_email");
 
-        // 🔒 no identity = block
+        // ❌ no email = no access
         if (!email) {
           router.push("/");
           return;
         }
 
-        const res = await fetch(`${API_URL}/api/dashboard`, {
+        // 🔥 REAL CHECK AGAINST BACKEND (NOT TRUST LOCAL STATE)
+        const res = await fetch(`${API_URL}/api/dashboard/access`, {
+          method: "GET",
           headers: {
             "x-user-email": email,
           },
@@ -36,9 +38,18 @@ export default function Dashboard() {
 
         const data = await res.json();
 
-        setUser({ email });
-        setAccess(true);
+        // backend decides if paid or not
+        if (!data?.active) {
+          router.push("/");
+          return;
+        }
 
+        setUser({
+          email,
+          plan: data.plan || "starter",
+        });
+
+        setAccess(true);
       } catch (err) {
         console.error(err);
         router.push("/");
@@ -50,7 +61,9 @@ export default function Dashboard() {
     checkAccess();
   }, []);
 
-  // 🔒 loading state
+  // =====================
+  // LOADING
+  // =====================
   if (loading) {
     return (
       <div style={{ padding: 40 }}>
@@ -59,24 +72,30 @@ export default function Dashboard() {
     );
   }
 
-  // 🔒 blocked access
+  // =====================
+  // BLOCKED
+  // =====================
   if (!access) {
     return (
       <div style={{ padding: 40 }}>
         <h2>Access denied</h2>
-        <p>You do not have an active subscription.</p>
+        <p>No active subscription found.</p>
       </div>
     );
   }
 
+  // =====================
+  // DASHBOARD
+  // =====================
   return (
     <div style={{ padding: 40 }}>
       <h1>NorthSky Flow OS</h1>
 
       <p>Logged in as: {user.email}</p>
+      <p>Plan: {user.plan}</p>
 
       <div style={{ marginTop: 20 }}>
-        <h3>📊 Dashboard</h3>
+        <h3>📊 System Status</h3>
 
         <ul>
           <li>Lead system: Active</li>
