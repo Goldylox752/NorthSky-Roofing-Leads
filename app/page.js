@@ -1,27 +1,43 @@
 "use client";
 
+import { useState } from "react";
+
 export default function Home() {
+  const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
+    if (loading) return;
+
+    setLoading(true);
+
     try {
-      const res = await fetch("/api/payments/checkout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+      const res = await fetch(
+        `${API_URL}/api/payments/checkout`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
       const data = await res.json();
 
-      if (data.url) {
+      if (data?.url) {
         window.location.href = data.url;
-      } else {
-        alert("Checkout failed. Try again.");
+        return;
       }
 
+      alert("Checkout failed. Please try again.");
+
     } catch (err) {
-      console.error(err);
-      alert("Something went wrong.");
+      console.error("Checkout error:", err);
+      alert("Something went wrong. Please try again.");
+
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -50,18 +66,20 @@ export default function Home() {
 
         <button
           onClick={handleCheckout}
+          disabled={loading}
           style={{
             marginTop: 20,
             padding: "15px 30px",
             fontSize: 18,
-            background: "#22c55e",
+            background: loading ? "#64748b" : "#22c55e",
             border: "none",
             borderRadius: 8,
-            cursor: "pointer",
-            color: "white"
+            cursor: loading ? "not-allowed" : "pointer",
+            color: "white",
+            opacity: loading ? 0.7 : 1
           }}
         >
-          Get Access Now
+          {loading ? "Redirecting..." : "Get Access Now"}
         </button>
       </header>
 
@@ -114,18 +132,19 @@ export default function Home() {
 
         <button
           onClick={handleCheckout}
+          disabled={loading}
           style={{
             marginTop: 20,
             padding: "15px 30px",
             fontSize: 18,
-            background: "#22c55e",
+            background: loading ? "#64748b" : "#22c55e",
             border: "none",
             borderRadius: 8,
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
             color: "white"
           }}
         >
-          Get Started — $29+
+          {loading ? "Processing..." : "Get Started — $29+"}
         </button>
       </section>
 
