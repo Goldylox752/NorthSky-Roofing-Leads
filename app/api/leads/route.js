@@ -1,72 +1,112 @@
 const router = require("express").Router();
 const crypto = require("crypto");
 
-const { supabase } = require("../services/supabase");
+const supabase = require("../lib/supabase");
 const { buildKey } = require("../utils/idempotency");
 const { calculateScore, getTier } = require("../utils/scoring");
 const { calculatePrice } = require("../services/pricingEngine");
 
-// CREATE LEAD
+/* ===============================
+   CREATE LEAD
+=============================== */
 router.post("/", async (req, res) => {
   try {
     const { name, email, phone, city } = req.body;
 
-    if (!email && !phone) {
-      return res.status(400).json({ error: "Email or phone required" });
+    const cleanEmail = email?.trim().toLowerCase();
+
+    if (!cleanEmail && !phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Email or phone required",
+      });
     }
 
-    const idempotencyKey = buildKey(email, phone, city);
+    /* ===============================
+       IDEMPOTENCY KEY
+    =============================== */
+    const idempotencyKey = buildKey(cleanEmail, phone, city);
 
-    // CHECK DUPLICATE
-    const { data: existing } = await supabase
+    /* ===============================
+       CHECK EXISTING LEAD
+    =============================== */
+    const { data: existing, error: findError } = await supabase
       .from("leads")
-      .select("id, status")
+      .select("*")
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
 
-    if (existing) {
-      return res.json({ success: true, duplicate: true, lead: existing });
+    if (findError) {
+      console.error("Lookup error:", findError);
+      throw findError;
     }
 
-    // SCORE
-    const score = calculateScore({ email, phone, city });
+    if (existing) {
+      return res.json({
+        success: true,
+        duplicate: true,
+        lead: existing,
+      });
+    }
+
+    /* ===============================
+       SCORING ENGINE
+    =============================== */
+    const score = calculateScore({ email: cleanEmail, phone, city });
     const tier = getTier(score);
     const price = calculatePrice(score, city);
 
-    // INSERT LEAD
+    /* ===============================
+       CREATE LEAD
+    =============================== */
     const { data: lead, error } = await supabase
       .from("leads")
-      .insert({
-        id: crypto.randomUUID(),
-        name,
-        email,
-        phone,
-        city,
-        status: "new",
-        score,
-        tier,
-        price,
-        idempotency_key: idempotencyKey,
-        created_at: new Date().toISOString(),
-      })
+      .insert([
+        {
+          id: crypto.randomUUID(),
+          name: name || null,
+          email: cleanEmail || null,
+          phone: phone || null,
+          city: city || null,
+
+          status: "new",
+          score,
+          tier,
+          price,
+
+          idempotency_key: idempotencyKey,
+          created_at: new Date().toISOString(),
+        },
+      ])
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("Insert error:", error);
+      throw error;
+    }
 
+    /* ===============================
+       RESPONSE
+    =============================== */
     return res.json({
       success: true,
       lead,
       checkout: {
-        endpoint: "/api/checkout",
+        endpoint: "/api/payments/checkout",
         leadId: lead.id,
         amount: price,
+        tier,
       },
     });
 
   } catch (err) {
     console.error("LEAD ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
+
+    return res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
   }
 });
 
