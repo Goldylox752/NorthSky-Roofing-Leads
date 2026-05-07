@@ -1,140 +1,134 @@
 "use client";
 
-import { useState } from "react";
+export default function Home() {
 
-export default function Page() {
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    city: "",
-  });
-
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [leadId, setLeadId] = useState(null);
-  const [error, setError] = useState(null);
-
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-  const handleChange = (e) => {
-    setForm((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
-
-  const handleSubmit = async () => {
-    if (loading) return;
-
-    setError(null);
-
-    if (!API_URL) {
-      setError("API not configured");
-      return;
-    }
-
-    if (!form.email || !form.phone) {
-      setError("Email and phone are required");
-      return;
-    }
-
-    setLoading(true);
-
+  const handleCheckout = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/leads`, {
+      const res = await fetch("/api/payments/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ...form,
-          source: "landing_page",
-        }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Request failed");
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Checkout failed. Try again.");
       }
 
-      setLeadId(data.lead?.id || null);
-      setSuccess(true);
-
-      setForm({
-        name: "",
-        email: "",
-        phone: "",
-        city: "",
-      });
     } catch (err) {
       console.error(err);
-      setError("Submission failed. Try again.");
-    } finally {
-      setLoading(false);
+      alert("Something went wrong.");
     }
   };
 
   return (
-    <main style={styles.container}>
-      <h1>RoofFlow AI Leads</h1>
+    <div>
 
-      <p>Exclusive roofing leads. One contractor per city.</p>
+      {/* HERO */}
+      <header style={{
+        padding: "100px 20px",
+        textAlign: "center",
+        background: "linear-gradient(135deg, #1a2a6c, #0f172a)"
+      }}>
+        <h1 style={{ fontSize: 48 }}>
+          Automate Leads. Collect Payments. Grow Fast.
+        </h1>
 
-      {error && <p style={styles.error}>{error}</p>}
+        <p style={{
+          maxWidth: 700,
+          margin: "20px auto",
+          color: "#cbd5e1",
+          fontSize: 18
+        }}>
+          NorthSky Flow OS turns traffic into <b>paid customers automatically</b>.
+          Built for contractors, agencies, and local service businesses.
+        </p>
 
-      {success ? (
-        <div style={styles.success}>
-          <h2>Application Received ✔</h2>
-          <p>Tracking ID: {leadId}</p>
+        <button
+          onClick={handleCheckout}
+          style={{
+            marginTop: 20,
+            padding: "15px 30px",
+            fontSize: 18,
+            background: "#22c55e",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            color: "white"
+          }}
+        >
+          Get Access Now
+        </button>
+      </header>
+
+      {/* FEATURES */}
+      <section style={{ padding: "60px 20px", maxWidth: 1000, margin: "auto" }}>
+        <h2>What This System Does</h2>
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+          gap: 20,
+          marginTop: 20
+        }}>
+
+          <div style={{ background: "#111827", padding: 20, borderRadius: 10 }}>
+            ⚡ Instant Stripe Payments
+          </div>
+
+          <div style={{ background: "#111827", padding: 20, borderRadius: 10 }}>
+            📥 Automated Lead Capture
+          </div>
+
+          <div style={{ background: "#111827", padding: 20, borderRadius: 10 }}>
+            🔁 No Duplicate Payments
+          </div>
+
+          <div style={{ background: "#111827", padding: 20, borderRadius: 10 }}>
+            📊 Built for Contractors & Agencies
+          </div>
+
         </div>
-      ) : (
-        <div style={styles.form}>
-          <input name="name" placeholder="Name" value={form.name} onChange={handleChange} style={styles.input} />
-          <input name="email" placeholder="Email *" value={form.email} onChange={handleChange} style={styles.input} />
-          <input name="phone" placeholder="Phone *" value={form.phone} onChange={handleChange} style={styles.input} />
-          <input name="city" placeholder="City" value={form.city} onChange={handleChange} style={styles.input} />
+      </section>
 
-          <button onClick={handleSubmit} disabled={loading} style={styles.button}>
-            {loading ? "Submitting..." : "Apply Now"}
-          </button>
-        </div>
-      )}
-    </main>
+      {/* WHO IT'S FOR */}
+      <section style={{ padding: "60px 20px", maxWidth: 900, margin: "auto" }}>
+        <h2>Who This Is For</h2>
+
+        <ul style={{ lineHeight: 2 }}>
+          <li>🏠 Roofing companies</li>
+          <li>❄️ HVAC contractors</li>
+          <li>⚡ Solar installers</li>
+          <li>📞 Lead generation agencies</li>
+          <li>💼 Local service businesses</li>
+        </ul>
+      </section>
+
+      {/* FINAL CTA */}
+      <section style={{ textAlign: "center", padding: "80px 20px" }}>
+        <h2>Start Automating Your Business Today</h2>
+
+        <button
+          onClick={handleCheckout}
+          style={{
+            marginTop: 20,
+            padding: "15px 30px",
+            fontSize: 18,
+            background: "#22c55e",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            color: "white"
+          }}
+        >
+          Get Started — $29+
+        </button>
+      </section>
+
+    </div>
   );
 }
-
-const styles = {
-  container: {
-    fontFamily: "Arial",
-    padding: 40,
-    maxWidth: 600,
-    margin: "0 auto",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-  input: {
-    padding: 12,
-    border: "1px solid #ccc",
-    borderRadius: 6,
-  },
-  button: {
-    padding: 12,
-    background: "#000",
-    color: "#fff",
-    border: "none",
-    cursor: "pointer",
-  },
-  success: {
-    padding: 20,
-    background: "#eaffea",
-    borderRadius: 10,
-  },
-  error: {
-    color: "red",
-  },
-};
