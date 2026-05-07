@@ -1,7 +1,11 @@
 const router = require("express").Router();
+const express = require("express");
 const Stripe = require("stripe");
 const { createClient } = require("@supabase/supabase-js");
 
+/* ===============================
+   INIT
+=============================== */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -9,11 +13,46 @@ const supabase = createClient(
 );
 
 /* ===============================
-   RAW BODY REQUIRED (CRITICAL)
+   EVENT HANDLER (SEPARATED)
+=============================== */
+async function handleEvent(event) {
+  switch (event.type) {
+
+    case "checkout.session.completed": {
+      const session = event.data.object;
+
+      const email = session.metadata?.email;
+      const leadId = session.metadata?.leadId;
+      const plan = session.metadata?.plan;
+
+      if (!leadId) throw new Error("Missing leadId");
+
+      const { error } = await supabase
+        .from("leads")
+        .update({
+          paid: true,
+          plan,
+          status: "paid",
+          stripe_customer_id: session.customer,
+        })
+        .eq("id", leadId);
+
+      if (error) throw error;
+
+      break;
+    }
+
+    default:
+      console.log("Unhandled event:", event.type);
+  }
+}
+
+/* ===============================
+   WEBHOOK ROUTE
 =============================== */
 router.post(
   "/",
-  require("express").raw({ type: "application/json" }),
+  express.raw({ type: "application/json" }),
   async (req, res) => {
     let event;
 
@@ -21,11 +60,13 @@ router.post(
       const sig = req.headers["stripe-signature"];
 
       if (!sig) {
-        return res.status(400).send("Missing signature");
+        return res.status(400).json({
+          error: "Missing Stripe signature",
+        });
       }
 
       /* ===============================
-         VERIFY STRIPE SIGNATURE
+         VERIFY SIGNATURE
       =============================== */
       event = stripe.webhooks.constructEvent(
         req.body,
@@ -34,19 +75,24 @@ router.post(
       );
 
       /* ===============================
-         IDENTITY LOCK (NO DUPLICATES EVER)
+         IDEMPOTENCY CHECK
       =============================== */
       const { data: existing } = await supabase
         .from("stripe_events")
-        .select("*")
+        .select("id, status")
         .eq("id", event.id)
         .maybeSingle();
 
       if (existing?.status === "completed") {
-        return res.json({ ok: true, duplicate: true });
+        return res.json({
+          ok: true,
+          duplicate: true,
+        });
       }
 
-      /* insert event lock */
+      /* ===============================
+         INSERT EVENT LOCK
+      =============================== */
       await supabase.from("stripe_events").insert({
         id: event.id,
         type: event.type,
@@ -59,6 +105,9 @@ router.post(
       =============================== */
       await handleEvent(event);
 
+      /* ===============================
+         MARK COMPLETE
+      =============================== */
       await supabase
         .from("stripe_events")
         .update({
@@ -70,7 +119,7 @@ router.post(
       return res.json({ received: true });
 
     } catch (err) {
-      console.error("Webhook error:", err);
+      console.error("❌ Webhook error:", err);
 
       if (event?.id) {
         await supabase
@@ -82,7 +131,11 @@ router.post(
           .eq("id", event.id);
       }
 
-      return res.status(500).json({ error: "Webhook failed" });
+      return res.status(500).json({
+        error: "Webhook failed",
+      });
     }
   }
 );
+
+module.exports = router;
