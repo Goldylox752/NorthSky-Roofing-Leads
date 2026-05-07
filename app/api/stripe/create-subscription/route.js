@@ -1,59 +1,27 @@
-import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
+const router = require("express").Router();
+const Stripe = require("stripe");
+const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
 
-/* ===============================
-   ENV CHECK
-=============================== */
-const required = [
-  "STRIPE_SECRET_KEY",
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "FRONTEND_URL",
-];
-
-for (const k of required) {
-  if (!process.env[k]) {
-    throw new Error(`Missing ENV: ${k}`);
-  }
-}
-
-/* ===============================
-   INIT
-=============================== */
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-06-20",
-});
-
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-/* ===============================
-   PRICING
-=============================== */
 const PLANS = {
   starter: 9900,
   growth: 19900,
   elite: 49900,
 };
 
-/* ===============================
-   HELPERS
-=============================== */
-const normalizeEmail = (e = "") =>
-  e.trim().toLowerCase();
+const normalizeEmail = (e = "") => e.trim().toLowerCase();
 
 const hash = (v) =>
   crypto.createHash("sha256").update(v).digest("hex");
 
-const key = (email, plan) =>
-  hash(`${email}:${plan}`);
+const key = (email, plan) => hash(`${email}:${plan}`);
 
-/* ===============================
-   SAFE RATE LIMIT (FIXED)
-=============================== */
 async function rateLimit(email) {
   const since = new Date(Date.now() - 5 * 60 * 1000);
 
@@ -63,156 +31,72 @@ async function rateLimit(email) {
     .eq("email", email)
     .gte("created_at", since.toISOString());
 
-  if (error) return { allowed: true };
+  if (error) return true;
 
-  const c = count || 0;
-
-  if (c >= 12) return { allowed: false, reason: "blocked" };
-  if (c >= 6) return { allowed: false, reason: "cooldown" };
-
-  return { allowed: true };
+  return (count || 0) < 12;
 }
 
-/* ===============================
-   ATOMIC LOCK (FIXED)
-=============================== */
-async function acquireLock(id, email, plan) {
-  const expires = new Date(Date.now() + 25 * 60 * 1000);
-
-  const { error } = await supabase
-    .from("checkout_locks")
-    .upsert(
-      {
-        id,
-        email,
-        plan,
-        status: "active",
-        expires_at: expires.toISOString(),
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: "id" }
-    );
-
-  if (error) {
-    return { allowed: false };
-  }
-
-  return { allowed: true };
-}
-
-/* ===============================
-   HANDLER
-=============================== */
-export async function POST(req) {
+router.post("/checkout", async (req, res) => {
   try {
-    const { plan, email } = await req.json();
+    const { plan, email } = req.body;
 
     const cleanEmail = normalizeEmail(email);
     const amount = PLANS[plan];
 
-    if (!plan || !cleanEmail) {
-      return Response.json(
-        { error: "Missing input" },
-        { status: 400 }
-      );
-    }
+    if (!plan || !cleanEmail)
+      return res.status(400).json({ error: "Missing input" });
 
-    if (!amount) {
-      return Response.json(
-        { error: "Invalid plan" },
-        { status: 400 }
-      );
-    }
+    if (!amount)
+      return res.status(400).json({ error: "Invalid plan" });
 
-    /* =======================
-       RATE LIMIT
-    ======================= */
-    const rl = await rateLimit(cleanEmail);
+    const allowed = await rateLimit(cleanEmail);
 
-    if (!rl.allowed) {
-      return Response.json(
-        { error: rl.reason },
-        { status: 429 }
-      );
-    }
+    if (!allowed)
+      return res.status(429).json({ error: "rate_limited" });
 
-    /* =======================
-       IDEMPOTENCY KEY
-    ======================= */
     const checkoutKey = key(cleanEmail, plan);
 
-    /* =======================
-       LOCK
-    ======================= */
-    const lock = await acquireLock(
-      checkoutKey,
-      cleanEmail,
-      plan
-    );
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: cleanEmail,
 
-    if (!lock.allowed) {
-      return Response.json(
-        { error: "checkout_locked" },
-        { status: 409 }
-      );
-    }
-
-    /* =======================
-       STRIPE SESSION
-    ======================= */
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        customer_email: cleanEmail,
-
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: `RoofFlow ${plan}`,
-              },
-              unit_amount: amount,
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `RoofFlow ${plan}`,
             },
-            quantity: 1,
+            unit_amount: amount,
           },
-        ],
-
-        success_url: `${process.env.FRONTEND_URL}/success?plan=${plan}`,
-        cancel_url: `${process.env.FRONTEND_URL}/cancel`,
-
-        metadata: {
-          plan,
-          email: cleanEmail,
-          key: checkoutKey,
+          quantity: 1,
         },
-      },
-      {
-        idempotencyKey: checkoutKey,
-      }
-    );
+      ],
 
-    /* =======================
-       LOG (NON-BLOCKING)
-    ======================= */
+      success_url: `${process.env.FRONTEND_URL}/success?plan=${plan}`,
+      cancel_url: `${process.env.FRONTEND_URL}/cancel`,
+
+      metadata: {
+        plan,
+        email: cleanEmail,
+        key: checkoutKey,
+      },
+    });
+
     supabase.from("checkout_attempts").insert({
       email: cleanEmail,
       plan,
       created_at: new Date().toISOString(),
-    }).catch(() => {});
+    });
 
-    return Response.json({
+    res.json({
       url: session.url,
-      plan,
-      amount,
     });
 
   } catch (err) {
-    console.error("Checkout error:", err);
-
-    return Response.json(
-      { error: "checkout_failed" },
-      { status: 500 }
-    );
+    console.error(err);
+    res.status(500).json({ error: "checkout_failed" });
   }
-}
+});
+
+module.exports = router;
