@@ -1,27 +1,47 @@
 // ===============================
-// 🌐 FLOW OS API CLIENT (SINGLE SOURCE OF TRUTH)
+// 🌐 FLOW OS API CLIENT (PRODUCTION READY)
 // ===============================
 
 const FLOW_API =
   process.env.NEXT_PUBLIC_FLOW_API ||
   "https://northsky-flow-os.onrender.com";
 
+const TIMEOUT = 12000;
+
+// ===============================
+// ⏱️ TIMEOUT WRAPPER
+// ===============================
+function timeoutPromise(ms) {
+  return new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Request timeout")), ms)
+  );
+}
+
 // ===============================
 // 🔧 CORE REQUEST ENGINE
 // ===============================
 async function request(url, options = {}) {
+  const controller = new AbortController();
+
   try {
-    const res = await fetch(`${FLOW_API}${url}`, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-      ...options,
-    });
+    const res = await Promise.race([
+      fetch(`${FLOW_API}${url}`, {
+        method: options.method || "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {}),
+        },
+        body: options.body,
+        signal: controller.signal,
+      }),
+      timeoutPromise(TIMEOUT),
+    ]);
 
     const data = await res.json();
 
     if (!res.ok) {
+      console.error("API ERROR:", url, data);
+
       return {
         success: false,
         error: data?.error || `HTTP ${res.status}`,
@@ -34,63 +54,13 @@ async function request(url, options = {}) {
     };
 
   } catch (err) {
+    console.error("NETWORK ERROR:", url, err);
+
     return {
       success: false,
       error: err.message || "Network error",
     };
+  } finally {
+    controller.abort();
   }
 }
-
-// ===============================
-// 📩 LEADS
-// ===============================
-export const createLead = (data) =>
-  request("/api/leads", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-export const getLeads = () =>
-  request("/api/leads");
-
-// ===============================
-// 🧾 JOBS
-// ===============================
-export const createJob = (data) =>
-  request("/api/jobs", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-export const getJobs = () =>
-  request("/api/jobs");
-
-// ===============================
-// 💰 QUOTES
-// ===============================
-export const createQuote = (data) =>
-  request("/api/quotes", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-// ===============================
-// 🔥 AUCTIONS (ADDED)
-// ===============================
-export const createAuction = (data) =>
-  request("/api/auction/create", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-export const placeBid = (data) =>
-  request("/api/auction/bid", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-export const closeAuction = (data) =>
-  request("/api/auction/close", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
