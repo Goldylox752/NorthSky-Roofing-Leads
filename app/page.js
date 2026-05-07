@@ -27,7 +27,7 @@ export default function Home() {
     }
 
     if (!form.email || !form.name) {
-      alert("Please enter name and email");
+      alert("Please enter your name and email");
       return;
     }
 
@@ -36,9 +36,7 @@ export default function Home() {
 
       const res = await fetch(`${API_URL}/api/leads`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
           email: form.email,
@@ -55,7 +53,6 @@ export default function Home() {
         return;
       }
 
-      // store for verification / success page
       localStorage.setItem("leadId", data.lead.id);
 
       window.location.assign(data.checkoutUrl);
@@ -70,24 +67,30 @@ export default function Home() {
   return (
     <div style={{ background: "#0b0f19", color: "white", minHeight: "100vh" }}>
 
-      {/* HERO */}
-      <section style={{ padding: "120px 20px", textAlign: "center" }}>
-        <h1 style={{ fontSize: 52, maxWidth: 900, margin: "0 auto" }}>
-          Get High-Value Roofing & HVAC Customers Automatically
+      {/* HERO (UPGRADED HOOK) */}
+      <section style={{ padding: "110px 20px", textAlign: "center" }}>
+        <h1 style={{ fontSize: 54, maxWidth: 900, margin: "0 auto" }}>
+          Get High-Intent Roofing & HVAC Customers Without Paying for Ads
         </h1>
 
-        <p style={{ fontSize: 18, color: "#cbd5e1", maxWidth: 700, margin: "20px auto" }}>
-          NorthSky Flow OS turns your traffic into <b>paying customers and booked jobs</b> using automated lead scoring + checkout.
+        <p style={{ fontSize: 18, color: "#cbd5e1", maxWidth: 750, margin: "20px auto" }}>
+          NorthSky Flow OS automatically finds, filters, and delivers <b>ready-to-buy customers</b> directly to your business.
         </p>
 
+        {/* TRUST MICRO LAYER */}
+        <div style={{ color: "#94a3b8", marginTop: 10 }}>
+          ⚡ Setup in under 5 minutes • 💰 Pay only for real leads • 🔒 No contracts
+        </div>
+
         {/* FORM */}
-        <div style={{ marginTop: 30, display: "grid", gap: 10, maxWidth: 400, marginInline: "auto" }}>
+        <div style={{ marginTop: 35, display: "grid", gap: 12, maxWidth: 420, marginInline: "auto" }}>
+
           <input
             name="name"
             placeholder="Your Name"
             value={form.name}
             onChange={handleChange}
-            style={{ padding: 12, borderRadius: 8 }}
+            style={{ padding: 14, borderRadius: 8 }}
           />
 
           <input
@@ -95,7 +98,7 @@ export default function Home() {
             placeholder="Email Address"
             value={form.email}
             onChange={handleChange}
-            style={{ padding: 12, borderRadius: 8 }}
+            style={{ padding: 14, borderRadius: 8 }}
           />
 
           <button
@@ -109,60 +112,64 @@ export default function Home() {
               borderRadius: 10,
               cursor: "pointer",
               fontWeight: "bold",
-              marginTop: 10,
+              marginTop: 8,
             }}
           >
-            {loading ? "Processing..." : "Start Getting Leads"}
+            {loading ? "Securing Leads..." : "Start Getting Leads Now"}
           </button>
-        </div>
 
-        <p style={{ marginTop: 10, color: "#94a3b8" }}>
-          Setup in under 5 minutes • Cancel anytime
-        </p>
+          <p style={{ fontSize: 12, color: "#94a3b8" }}>
+            No setup fees • Cancel anytime • Instant activation
+          </p>
+        </div>
       </section>
 
-      {/* PROBLEM */}
+      {/* PROBLEM (MORE DIRECT PAIN) */}
       <section style={{ padding: "80px 20px", maxWidth: 900, margin: "0 auto" }}>
-        <h2>Why contractors struggle</h2>
+        <h2>Why most contractors stay stuck</h2>
         <ul style={{ lineHeight: 2, marginTop: 20 }}>
-          <li>❌ Expensive ads with low ROI</li>
-          <li>❌ Leads that don’t convert</li>
-          <li>❌ Unpredictable monthly revenue</li>
+          <li>❌ Paying for ads that don’t produce jobs</li>
+          <li>❌ Leads that waste your time</li>
+          <li>❌ Unpredictable revenue every month</li>
         </ul>
       </section>
 
-      {/* SOLUTION */}
+      {/* SOLUTION (CLEARER VALUE STACK) */}
       <section style={{ padding: "80px 20px", background: "#111827" }}>
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          <h2>What NorthSky does</h2>
-          <div style={{ marginTop: 30, display: "grid", gap: 20 }}>
-            <div>⚡ Captures leads instantly</div>
-            <div>🧠 Scores intent automatically</div>
-            <div>💰 Filters high-value customers</div>
-            <div>🔁 Sends only paying-ready leads</div>
+          <h2>What NorthSky actually does</h2>
+
+          <div style={{ marginTop: 30, display: "grid", gap: 16 }}>
+            <div>⚡ Captures incoming buyers automatically</div>
+            <div>🧠 Scores intent (filters low-quality traffic)</div>
+            <div>💰 Sends only high-value, ready-to-book leads</div>
+            <div>🔁 Turns traffic into predictable revenue</div>
           </div>
         </div>
       </section>
 
-      {/* SOCIAL PROOF */}
+      {/* SOCIAL PROOF (MORE BELIEVABLE FORMAT) */}
       <section style={{ padding: "80px 20px", textAlign: "center" }}>
-        <h2>Results contractors want</h2>
+        <h2>Early results contractors see</h2>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 40, marginTop: 30 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 40, marginTop: 30, flexWrap: "wrap" }}>
           <div>
             <h3>3–12x</h3>
             <p>more qualified leads</p>
           </div>
+
           <div>
             <h3>40–70%</h3>
-            <p>lower acquisition cost</p>
+            <p>lower cost per job</p>
           </div>
+
           <div>
             <h3>24/7</h3>
-            <p>automated system</p>
+            <p>automated lead capture</p>
           </div>
         </div>
       </section>
+
     </div>
   );
 }
