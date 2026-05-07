@@ -5,14 +5,17 @@ const cors = require("cors");
    ROUTES
 =============================== */
 const leadsRoutes = require("./routes/leads.routes");
+const paymentsRoutes = require("./routes/payments.routes");
 const stripeWebhook = require("./routes/stripe.webhook");
 
 const app = express();
 
 /* ===============================
-   WEBHOOK MUST BE RAW (IMPORTANT)
+   STRIPE WEBHOOK (RAW BODY ONLY)
+   MUST COME BEFORE express.json()
 =============================== */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
+app.use("/api/stripe/webhook", stripeWebhook);
 
 /* ===============================
    GLOBAL MIDDLEWARE
@@ -27,7 +30,7 @@ app.use(express.json());
    ROUTES
 =============================== */
 app.use("/api/leads", leadsRoutes);
-app.use("/api/stripe/webhook", stripeWebhook);
+app.use("/api/payments", paymentsRoutes);
 
 /* ===============================
    HEALTH CHECK
