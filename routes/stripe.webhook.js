@@ -1,12 +1,3 @@
-const express = require("express");
-const router = express.Router();
-
-const stripe = require("../lib/stripe");
-const supabase = require("../lib/supabase");
-
-/* ===============================
-   STRIPE WEBHOOK
-=============================== */
 router.post(
   "/",
   express.raw({ type: "application/json" }),
@@ -22,14 +13,10 @@ router.post(
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } catch (err) {
-      console.error("❌ Webhook signature failed:", err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     try {
-      /* ===============================
-         IDEMPOTENCY LOCK
-      =============================== */
       const { data: existing } = await supabase
         .from("stripe_events")
         .select("id")
@@ -47,9 +34,6 @@ router.post(
         created_at: new Date().toISOString(),
       });
 
-      /* ===============================
-         HANDLE EVENTS
-      =============================== */
       switch (event.type) {
 
         case "checkout.session.completed": {
@@ -60,47 +44,27 @@ router.post(
             session.customer_email ||
             null;
 
-          const plan = session.metadata?.plan || "starter";
+          if (!email) throw new Error("Missing email");
 
-          if (!email) {
-            throw new Error("Missing email in session");
-          }
-
-          const { data, error } = await supabase
-            .from("leads")
-            .upsert(
-              {
-                email,
-                plan,
-                paid: true,
-                stripe_customer_id: session.customer,
-              },
-              { onConflict: "email" }
-            )
-            .select()
-            .single();
+          const { error } = await supabase.from("leads").upsert({
+            email,
+            plan: session.metadata?.plan || "starter",
+            paid: true,
+            stripe_customer_id: session.customer,
+          });
 
           if (error) throw error;
 
-          console.log("✅ User activated:", data);
           break;
         }
 
         case "customer.subscription.updated": {
           const sub = event.data.object;
 
-          const plan =
-            sub.items.data[0]?.price?.nickname ||
-            sub.items.data[0]?.price?.id ||
-            "pro";
-
-          await supabase
-            .from("leads")
-            .update({
-              subscription_status: sub.status,
-              plan,
-            })
-            .eq("stripe_customer_id", sub.customer);
+          await supabase.from("leads").update({
+            subscription_status: sub.status,
+            plan: sub.items.data[0]?.price?.id || "pro",
+          }).eq("stripe_customer_id", sub.customer);
 
           break;
         }
@@ -108,31 +72,29 @@ router.post(
         case "customer.subscription.deleted": {
           const sub = event.data.object;
 
-          await supabase
-            .from("leads")
-            .update({
-              active: false,
-              plan: "free",
-            })
-            .eq("stripe_customer_id", sub.customer);
+          await supabase.from("leads").update({
+            active: false,
+            plan: "free",
+          }).eq("stripe_customer_id", sub.customer);
 
           break;
         }
-
-        default:
-          console.log("Unhandled event:", event.type);
       }
 
-      res.json({ received: true });
+      await supabase.from("stripe_events").update({
+        status: "completed",
+        processed_at: new Date().toISOString(),
+      }).eq("id", event.id);
+
+      return res.json({ received: true });
 
     } catch (err) {
-      console.error("❌ Webhook processing error:", err);
+      await supabase.from("stripe_events").update({
+        status: "failed",
+        error: err.message,
+      }).eq("id", event.id);
 
-      return res.status(500).json({
-        error: "Webhook handler failed",
-      });
+      return res.status(500).json({ error: "Webhook failed" });
     }
   }
 );
-
-module.exports = router;
