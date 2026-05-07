@@ -1,110 +1,56 @@
-const router = require("express").Router();
-const crypto = require("crypto");
-
-const supabase = require("../lib/supabase");
-const { buildKey } = require("../utils/idempotency");
-const { calculateScore, getTier } = require("../utils/scoring");
-const { calculatePrice } = require("../services/pricingEngine");
-
-const { createCheckoutSession } = require("../services/stripeCheckout");
+const stripe = require("../lib/stripe");
+require("dotenv").config();
 
 /* ===============================
-   CREATE LEAD + STRIPE CHECKOUT
+   CREATE STRIPE CHECKOUT SESSION
 =============================== */
-router.post("/", async (req, res) => {
+async function createCheckoutSession({ email, leadId, plan, amount }) {
+  if (!email || !leadId || !plan) {
+    throw new Error("Missing required checkout parameters");
+  }
+
   try {
-    const { name, email, phone, city } = req.body;
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
 
-    const cleanEmail = email?.trim().toLowerCase();
-
-    if (!cleanEmail && !phone) {
-      return res.status(400).json({
-        success: false,
-        error: "Email or phone required",
-      });
-    }
-
-    const idempotencyKey = buildKey(cleanEmail, phone, city);
-
-    /* ===============================
-       CHECK DUPLICATE LEAD
-    =============================== */
-    const { data: existing } = await supabase
-      .from("leads")
-      .select("*")
-      .eq("idempotency_key", idempotencyKey)
-      .maybeSingle();
-
-    if (existing) {
-      return res.json({
-        success: true,
-        duplicate: true,
-        lead: existing,
-      });
-    }
-
-    /* ===============================
-       SCORING
-    =============================== */
-    const score = calculateScore({ email: cleanEmail, phone, city });
-    const tier = getTier(score);
-    const price = calculatePrice(score, city);
-
-    /* ===============================
-       CREATE LEAD
-    =============================== */
-    const { data: lead, error } = await supabase
-      .from("leads")
-      .insert([
+      line_items: [
         {
-          id: crypto.randomUUID(),
-          name: name || null,
-          email: cleanEmail,
-          phone: phone || null,
-          city: city || null,
-
-          status: "pending_payment",
-          score,
-          tier,
-          price,
-
-          idempotency_key: idempotencyKey,
-          created_at: new Date().toISOString(),
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `NorthSky Flow OS - ${plan}`,
+              description: "Automated Lead-to-Payment System Access",
+            },
+            unit_amount: amount || 2900, // fallback safety
+          },
+          quantity: 1,
         },
-      ])
-      .select()
-      .single();
+      ],
 
-    if (error) throw error;
+      // 🔥 CRITICAL: ensures onboarding works
+      success_url: `${process.env.FRONTEND_URL}/onboarding?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL}/`,
 
-    /* ===============================
-       CREATE STRIPE CHECKOUT
-    =============================== */
-    const session = await createCheckoutSession({
-      email: cleanEmail,
-      leadId: lead.id,
-      plan: tier, // or "starter/growth/elite"
+      // 🔥 SOURCE OF TRUTH (used by webhook)
+      metadata: {
+        email,
+        leadId,
+        plan,
+      },
+
+      // improves Stripe customer tracking
+      customer_email: email,
     });
 
-    /* ===============================
-       RESPONSE
-    =============================== */
-    return res.json({
-      success: true,
-      lead,
-      checkoutUrl: session.url,
-      amount: price,
-      tier,
-    });
+    return session;
 
   } catch (err) {
-    console.error("LEAD ERROR:", err);
-
-    return res.status(500).json({
-      success: false,
-      error: "Server error",
-    });
+    console.error("❌ Stripe checkout error:", err);
+    throw err;
   }
-});
+}
 
-module.exports = router;
+module.exports = {
+  createCheckoutSession,
+};
