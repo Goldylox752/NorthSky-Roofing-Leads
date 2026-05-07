@@ -14,11 +14,10 @@ const supabase = createClient(
 );
 
 /* ===============================
-   HANDLE EVENT LOGIC
+   HANDLE EVENT
 =============================== */
 async function handleEvent(event) {
   if (event.type !== "checkout.session.completed") {
-    console.log("Unhandled event:", event.type);
     return;
   }
 
@@ -31,7 +30,10 @@ async function handleEvent(event) {
     throw new Error("Missing leadId or plan in metadata");
   }
 
-  const { error } = await supabase
+  /* ===============================
+     1. UPDATE LEAD
+  =============================== */
+  const { error: leadError } = await supabase
     .from("leads")
     .update({
       paid: true,
@@ -41,7 +43,27 @@ async function handleEvent(event) {
     })
     .eq("id", leadId);
 
-  if (error) throw error;
+  if (leadError) throw leadError;
+
+  /* ===============================
+     2. CREATE PAYMENT RECORD (SOURCE OF TRUTH)
+  =============================== */
+  const { error: paymentError } = await supabase
+    .from("payments")
+    .insert({
+      id: session.id,
+      lead_id: leadId,
+      stripe_customer_id: session.customer || null,
+      amount: session.amount_total || 0,
+      currency: session.currency || "usd",
+      status: "paid",
+      created_at: new Date().toISOString(),
+    });
+
+  if (paymentError && paymentError.code !== "23505") {
+    // ignore duplicates, but fail real errors
+    throw paymentError;
+  }
 }
 
 /* ===============================
@@ -60,7 +82,9 @@ router.post(
         return res.status(400).json({ error: "Missing Stripe signature" });
       }
 
-      // Verify Stripe event
+      /* ===============================
+         VERIFY STRIPE EVENT
+      =============================== */
       event = stripe.webhooks.constructEvent(
         req.body,
         sig,
@@ -70,7 +94,7 @@ router.post(
       console.log("[StripeWebhook]", event.id, event.type);
 
       /* ===============================
-         IDEMPOTENCY CHECK (SAFE INSERT)
+         IDEMPOTENCY (SAFE FIRST INSERT)
       =============================== */
       const { data: existing } = await supabase
         .from("stripe_events")
@@ -82,7 +106,6 @@ router.post(
         return res.json({ ok: true, duplicate: true });
       }
 
-      // Log event first
       const { error: insertError } = await supabase
         .from("stripe_events")
         .insert({
@@ -92,7 +115,13 @@ router.post(
           created_at: new Date().toISOString(),
         });
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        // if duplicate race happens
+        if (insertError.code === "23505") {
+          return res.json({ ok: true, duplicate: true });
+        }
+        throw insertError;
+      }
 
       /* ===============================
          PROCESS EVENT
