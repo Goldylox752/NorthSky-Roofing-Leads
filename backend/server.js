@@ -1,16 +1,19 @@
 "use strict";
 
 /* =========================
-   ENV (SAFE LOAD)
+   SAFE ENV LOADING
 ========================= */
 if (process.env.NODE_ENV !== "production") {
   try {
     require("dotenv").config();
-  } catch (err) {
-    console.warn("⚠️ dotenv not installed (ok in production)");
+  } catch (e) {
+    console.warn("dotenv not installed (ok in production)");
   }
 }
 
+/* =========================
+   IMPORTS
+========================= */
 const express = require("express");
 const cors = require("cors");
 const Stripe = require("stripe");
@@ -20,9 +23,21 @@ const crypto = require("crypto");
 const app = express();
 
 /* =========================
-   ENV VALIDATION
+   BASIC HEALTH (NO DEPENDENCIES)
 ========================= */
-const required = [
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+/* =========================
+   ENV CHECK (NON-FATAL)
+   → DO NOT CRASH SERVER
+========================= */
+const requiredEnv = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "SUPABASE_URL",
@@ -30,55 +45,49 @@ const required = [
   "FRONTEND_URL",
 ];
 
-const missing = required.filter((k) => !process.env[k]);
+const missing = requiredEnv.filter((k) => !process.env[k]);
 
 if (missing.length) {
-  console.error("❌ Missing ENV variables:", missing);
-  process.exit(1);
+  console.error("⚠️ Missing ENV vars:", missing);
 }
 
 /* =========================
-   INIT CLIENTS
+   INIT CLIENTS (ONLY IF VALID)
 ========================= */
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const supabase =
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY
+      )
+    : null;
 
 /* =========================
    CORS
 ========================= */
 app.use(
   cors({
-    origin: (origin, cb) => {
-      const allowed = [process.env.FRONTEND_URL];
-
-      if (!origin) return cb(null, true); // server-to-server / Stripe
-
-      if (allowed.includes(origin)) return cb(null, true);
-
-      console.warn("⚠️ CORS blocked:", origin);
-      return cb(null, false);
-    },
+    origin: process.env.FRONTEND_URL || "*",
     credentials: true,
   })
 );
 
 /* =========================
-   STRIPE WEBHOOK (RAW BODY)
+   WEBHOOK (RAW BODY)
 ========================= */
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
     try {
-      const sig = req.headers["stripe-signature"];
+      if (!stripe) return res.status(500).send("Stripe not configured");
 
-      if (!sig) {
-        return res.status(400).send("Missing Stripe signature");
-      }
+      const sig = req.headers["stripe-signature"];
+      if (!sig) return res.status(400).send("Missing signature");
 
       const event = stripe.webhooks.constructEvent(
         req.body,
@@ -90,51 +99,39 @@ app.post(
         const session = event.data.object;
         const leadId = session?.metadata?.leadId;
 
-        if (leadId) {
-          const { error } = await supabase
+        if (leadId && supabase) {
+          await supabase
             .from("leads")
             .update({
               status: "paid",
               paid_at: new Date().toISOString(),
             })
             .eq("id", leadId);
-
-          if (error) {
-            console.error("❌ Supabase update error:", error);
-          }
         }
       }
 
       res.json({ received: true });
     } catch (err) {
-      console.error("❌ Webhook error:", err.message);
-      res.status(400).send("Webhook Error");
+      console.error("Webhook error:", err.message);
+      res.status(400).send("Webhook failed");
     }
   }
 );
 
 /* =========================
-   JSON MIDDLEWARE
+   JSON BODY
 ========================= */
 app.use(express.json({ limit: "1mb" }));
-
-/* =========================
-   HEALTH CHECK
-========================= */
-app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "roofflow-backend",
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-  });
-});
 
 /* =========================
    CREATE LEAD
 ========================= */
 app.post("/api/leads", async (req, res) => {
   try {
+    if (!supabase) {
+      return res.status(500).json({ error: "Database not configured" });
+    }
+
     const { name, email, phone, city } = req.body;
 
     if (!email && !phone) {
@@ -160,21 +157,12 @@ app.post("/api/leads", async (req, res) => {
       .select()
       .single();
 
-    if (error) {
-      console.error("❌ Supabase insert error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Database error",
-      });
-    }
+    if (error) throw error;
 
     res.json({ success: true, lead: data });
   } catch (err) {
-    console.error("❌ Lead error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Server error",
-    });
+    console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
@@ -183,13 +171,14 @@ app.post("/api/leads", async (req, res) => {
 ========================= */
 app.post("/api/checkout", async (req, res) => {
   try {
+    if (!stripe) {
+      return res.status(500).json({ error: "Stripe not configured" });
+    }
+
     const { leadId, amount } = req.body;
 
     if (!leadId || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid request",
-      });
+      return res.status(400).json({ error: "Invalid request" });
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -200,7 +189,7 @@ app.post("/api/checkout", async (req, res) => {
           price_data: {
             currency: "usd",
             product_data: {
-              name: "RoofFlow AI Lead",
+              name: "RoofFlow Lead",
             },
             unit_amount: Math.round(amount * 100),
           },
@@ -212,16 +201,10 @@ app.post("/api/checkout", async (req, res) => {
       metadata: { leadId },
     });
 
-    res.json({
-      success: true,
-      url: session.url,
-    });
+    res.json({ url: session.url });
   } catch (err) {
-    console.error("❌ Checkout error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Checkout failed",
-    });
+    console.error(err);
+    res.status(500).json({ error: "Checkout failed" });
   }
 });
 
@@ -229,21 +212,7 @@ app.post("/api/checkout", async (req, res) => {
    404
 ========================= */
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Route not found",
-  });
-});
-
-/* =========================
-   GLOBAL ERROR HANDLER
-========================= */
-app.use((err, req, res, next) => {
-  console.error("🔥 Server crash:", err);
-  res.status(500).json({
-    success: false,
-    error: "Internal server error",
-  });
+  res.status(404).json({ error: "Not found" });
 });
 
 /* =========================
@@ -252,5 +221,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Backend running on port ${PORT}`);
+  console.log("🚀 Server running on port", PORT);
+
+  if (missing.length) {
+    console.warn("⚠️ Missing env vars:", missing);
+  }
 });
