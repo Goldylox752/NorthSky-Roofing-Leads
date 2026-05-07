@@ -11,17 +11,20 @@ const { createCheckoutSession } = require("../services/stripeCheckout");
    CREATE LEAD + STRIPE CHECKOUT
 =============================== */
 router.post("/", async (req, res) => {
+  let leadId = null;
+
   try {
     const { name, email, phone, city } = req.body;
 
     const cleanEmail = email?.trim().toLowerCase();
 
     /* ===============================
-       INPUT VALIDATION (CRITICAL FIX)
+       VALIDATION
     =============================== */
     if (!cleanEmail && !phone) {
       return res.status(400).json({
         success: false,
+        stage: "validation",
         error: "Email or phone required",
       });
     }
@@ -29,6 +32,7 @@ router.post("/", async (req, res) => {
     if (cleanEmail && !cleanEmail.includes("@")) {
       return res.status(400).json({
         success: false,
+        stage: "validation",
         error: "Invalid email format",
       });
     }
@@ -36,7 +40,7 @@ router.post("/", async (req, res) => {
     const idempotencyKey = buildKey(cleanEmail, phone, city);
 
     /* ===============================
-       DUPLICATE PREVENTION
+       DUPLICATE CHECK
     =============================== */
     const { data: existing } = await supabase
       .from("leads")
@@ -49,18 +53,14 @@ router.post("/", async (req, res) => {
         success: true,
         duplicate: true,
         lead: existing,
+        checkoutUrl: null,
       });
     }
 
     /* ===============================
-       LEAD SCORING ENGINE
+       SCORING + PRICING
     =============================== */
-    const score = calculateScore({
-      email: cleanEmail,
-      phone,
-      city,
-    });
-
+    const score = calculateScore({ email: cleanEmail, phone, city });
     const tier = getTier(score);
     const price = calculatePrice(score, city);
 
@@ -91,34 +91,24 @@ router.post("/", async (req, res) => {
 
     if (error) throw error;
 
+    leadId = lead.id;
+
     /* ===============================
-       CREATE STRIPE CHECKOUT SESSION
-       (FULL SAFE VERSION)
+       CREATE STRIPE SESSION
     =============================== */
-    let session;
+    const session = await createCheckoutSession({
+      email: cleanEmail,
+      leadId: lead.id,
+      plan: tier,
+      amount: price,
+    });
 
-    try {
-      session = await createCheckoutSession({
-        email: cleanEmail,
-        leadId: lead.id,
-        plan: tier,
-        amount: price,
-      });
-
-    } catch (err) {
-      console.error("Stripe checkout failed:", err);
-
-      // rollback lead state
-      await supabase
-        .from("leads")
-        .update({ status: "checkout_failed" })
-        .eq("id", lead.id);
-
-      throw err;
+    if (!session?.url) {
+      throw new Error("Stripe session failed to return URL");
     }
 
     /* ===============================
-       MARK PAYMENT STARTED
+       UPDATE STATE → PAYMENT STARTED
     =============================== */
     await supabase
       .from("leads")
@@ -128,22 +118,36 @@ router.post("/", async (req, res) => {
       .eq("id", lead.id);
 
     /* ===============================
-       RESPONSE TO FRONTEND
+       SUCCESS RESPONSE (CONSISTENT)
     =============================== */
     return res.json({
       success: true,
+      stage: "checkout_created",
       lead,
       checkoutUrl: session.url,
-      amount: price,
       tier,
+      amount: price,
     });
 
   } catch (err) {
-    console.error("❌ LEAD ERROR:", err);
+    console.error("❌ LEAD FLOW ERROR:", err);
+
+    /* ===============================
+       SAFE FAILURE STATE UPDATE
+    =============================== */
+    if (leadId) {
+      await supabase
+        .from("leads")
+        .update({
+          status: "checkout_failed",
+        })
+        .eq("id", leadId);
+    }
 
     return res.status(500).json({
       success: false,
-      error: "Server error",
+      stage: "server_error",
+      error: err.message || "Server error",
     });
   }
 });
