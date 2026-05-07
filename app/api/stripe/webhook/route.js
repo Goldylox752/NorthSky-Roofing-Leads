@@ -14,44 +14,34 @@ const supabase = createClient(
 );
 
 /* ===============================
-   EVENT HANDLER
+   HANDLE EVENT LOGIC
 =============================== */
 async function handleEvent(event) {
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object;
-
-      const leadId = session.metadata?.leadId;
-      const plan = session.metadata?.plan;
-
-      if (!leadId || !plan || !session.customer) {
-        throw new Error("Missing required session metadata");
-      }
-
-      const { error, data } = await supabase
-        .from("leads")
-        .update({
-          paid: true,
-          plan,
-          status: "paid",
-          stripe_customer_id: session.customer,
-        })
-        .eq("id", leadId)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      if (!data) {
-        throw new Error("Lead not found");
-      }
-
-      break;
-    }
-
-    default:
-      console.log("Unhandled event:", event.type);
+  if (event.type !== "checkout.session.completed") {
+    console.log("Unhandled event:", event.type);
+    return;
   }
+
+  const session = event.data.object;
+
+  const leadId = session.metadata?.leadId;
+  const plan = session.metadata?.plan;
+
+  if (!leadId || !plan) {
+    throw new Error("Missing leadId or plan in metadata");
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      paid: true,
+      plan,
+      status: "paid",
+      stripe_customer_id: session.customer || null,
+    })
+    .eq("id", leadId);
+
+  if (error) throw error;
 }
 
 /* ===============================
@@ -65,27 +55,34 @@ router.post(
 
     try {
       const sig = req.headers["stripe-signature"];
+
       if (!sig) {
         return res.status(400).json({ error: "Missing Stripe signature" });
       }
 
-      /* ===============================
-         VERIFY STRIPE SIGNATURE
-      =============================== */
+      // Verify Stripe event
       event = stripe.webhooks.constructEvent(
         req.body,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
-      console.log("[StripeWebhook]", {
-        id: event.id,
-        type: event.type,
-      });
+      console.log("[StripeWebhook]", event.id, event.type);
 
       /* ===============================
-         IDEMPOTENCY (RACE-SAFE INSERT)
+         IDEMPOTENCY CHECK (SAFE INSERT)
       =============================== */
+      const { data: existing } = await supabase
+        .from("stripe_events")
+        .select("id")
+        .eq("id", event.id)
+        .maybeSingle();
+
+      if (existing) {
+        return res.json({ ok: true, duplicate: true });
+      }
+
+      // Log event first
       const { error: insertError } = await supabase
         .from("stripe_events")
         .insert({
@@ -95,14 +92,7 @@ router.post(
           created_at: new Date().toISOString(),
         });
 
-      // Duplicate event → already processed or in-flight
-      if (insertError && insertError.code === "23505") {
-        return res.json({ ok: true, duplicate: true });
-      }
-
-      if (insertError && insertError.code !== "23505") {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       /* ===============================
          PROCESS EVENT
