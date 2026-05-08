@@ -1,52 +1,64 @@
 const API_URL = import.meta.env.VITE_API_URL;
 
-// safety check (prevents silent undefined bugs)
+/* ===============================
+   ENV SAFETY CHECK
+=============================== */
 if (!API_URL) {
-  console.error("❌ Missing VITE_API_URL in frontend .env");
+  throw new Error("❌ Missing VITE_API_URL in frontend .env");
 }
 
-// ===============================
-// CREATE LEAD
-// ===============================
+/* ===============================
+   SAFE FETCH WRAPPER
+=============================== */
+async function safeFetch(url, options) {
+  const res = await fetch(url, options);
+
+  let data = null;
+
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error("Invalid JSON response from server");
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.error || "Request failed");
+  }
+
+  return data;
+}
+
+/* ===============================
+   CREATE LEAD
+=============================== */
 export async function createLead(data) {
-  const res = await fetch(`${API_URL}/api/leads`, {
+  return await safeFetch(`${API_URL}/api/leads`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(data),
   });
-
-  const json = await res.json();
-
-  if (!res.ok) {
-    throw new Error(json?.error || "Failed to create lead");
-  }
-
-  return json;
 }
 
-// ===============================
-// STRIPE CHECKOUT
-// ===============================
+/* ===============================
+   STRIPE CHECKOUT (FIXED ROUTE)
+=============================== */
 export async function createCheckout(payload) {
-  const res = await fetch(`${API_URL}/api/checkout`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  const data = await safeFetch(
+    `${API_URL}/api/payments/checkout`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
 
-  const json = await res.json();
-
-  if (!res.ok) {
-    throw new Error(json?.error || "Checkout failed");
-  }
-
-  if (!json?.url) {
+  if (!data?.url) {
     throw new Error("Missing Stripe checkout URL");
   }
 
-  return json;
+  return data;
 }
