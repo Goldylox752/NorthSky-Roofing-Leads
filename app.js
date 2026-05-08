@@ -1,129 +1,140 @@
-const express = require("express");
-const cors = require("cors");
-
-const app = express();
-
-/* ===============================
-   TRUST PROXY (RENDER / VERCEL SAFE)
-=============================== */
-app.set("trust proxy", 1);
-
-/* ===============================
-   CORS (PRODUCTION SAFE + FALLBACK)
-=============================== */
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "*",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  })
-);
-
-/* ===============================
-   STRIPE WEBHOOK (RAW BODY FIRST)
-   MUST BE BEFORE express.json()
-=============================== */
-app.use(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" })
-);
-
-/* ===============================
-   BODY PARSERS
-=============================== */
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-/* ===============================
-   HOME PAGE
-=============================== */
 app.get("/", (req, res) => {
   res.send(`
     <html>
       <head>
         <title>NorthSky Flow OS</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
           body {
             margin: 0;
-            font-family: Arial;
+            font-family: Arial, sans-serif;
             background: #0f172a;
             color: white;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
           }
-          .card {
+
+          .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 60px 20px;
             text-align: center;
-            background: #1e293b;
-            padding: 40px;
-            border-radius: 16px;
-            max-width: 500px;
           }
+
+          .hero h1 {
+            font-size: 42px;
+            margin-bottom: 10px;
+          }
+
+          .hero p {
+            font-size: 18px;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+          }
+
           .btn {
-            margin-top: 20px;
             display: inline-block;
-            padding: 12px 18px;
+            padding: 14px 22px;
             background: #22c55e;
             color: white;
             text-decoration: none;
-            border-radius: 8px;
+            border-radius: 10px;
+            font-weight: bold;
+          }
+
+          .section {
+            margin-top: 60px;
+          }
+
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+          }
+
+          .card {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 12px;
+          }
+
+          .price {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 10px 0;
+          }
+
+          .small {
+            color: #94a3b8;
+            font-size: 14px;
           }
         </style>
       </head>
+
       <body>
-        <div class="card">
-          <h1>🚀 NorthSky Flow OS</h1>
-          <p>AI Lead Automation + Stripe Payments Engine</p>
-          <a class="btn" href="/health">System Status</a>
+        <div class="container">
+
+          <!-- HERO -->
+          <div class="hero">
+            <h1>🚀 NorthSky Flow OS</h1>
+            <p>Automate leads. Capture payments. Scale your business with AI.</p>
+            <a class="btn" href="/api/payments/checkout">Get Started</a>
+          </div>
+
+          <!-- FEATURES -->
+          <div class="section">
+            <h2>⚡ What You Get</h2>
+            <div class="grid">
+              <div class="card">
+                <h3>Smart Lead Engine</h3>
+                <p class="small">Automatically scores and prices every lead.</p>
+              </div>
+
+              <div class="card">
+                <h3>Stripe Payments</h3>
+                <p class="small">Instant checkout + automated activation.</p>
+              </div>
+
+              <div class="card">
+                <h3>Automation System</h3>
+                <p class="small">Hands-free lead distribution workflow.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- PRICING -->
+          <div class="section">
+            <h2>💰 Pricing</h2>
+
+            <div class="grid">
+              <div class="card">
+                <h3>Starter</h3>
+                <div class="price">$49</div>
+                <p class="small">Basic lead access + automation</p>
+              </div>
+
+              <div class="card">
+                <h3>Pro</h3>
+                <div class="price">$99</div>
+                <p class="small">Higher quality leads + priority system</p>
+              </div>
+
+              <div class="card">
+                <h3>Elite</h3>
+                <div class="price">$199</div>
+                <p class="small">Premium leads + full automation</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- CTA -->
+          <div class="section">
+            <h2>Ready to Scale?</h2>
+            <p class="small">Start generating revenue automatically today.</p>
+            <a class="btn" href="/health">View System Status</a>
+          </div>
+
         </div>
       </body>
     </html>
   `);
 });
-
-/* ===============================
-   ROUTES
-=============================== */
-app.use("/api/leads", require("./routes/leads.routes"));
-app.use("/api/payments", require("./routes/payments.routes"));
-app.use("/api/billing", require("./routes/billing.routes"));
-app.use("/api/stripe/webhook", require("./routes/stripe.webhook"));
-
-/* ===============================
-   HEALTH CHECK
-=============================== */
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "northsky-flow-os",
-    environment: process.env.NODE_ENV || "development",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-/* ===============================
-   404 HANDLER
-=============================== */
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Route not found",
-    path: req.originalUrl,
-    method: req.method,
-  });
-});
-
-/* ===============================
-   GLOBAL ERROR HANDLER
-=============================== */
-app.use((err, req, res, next) => {
-  console.error("🔥 Server Error:", err);
-
-  res.status(500).json({
-    success: false,
-    error: "Internal server error",
-  });
-});
-
-module.exports = app;
