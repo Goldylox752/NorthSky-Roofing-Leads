@@ -1,41 +1,42 @@
 const crypto = require("crypto");
-
-/* ===============================
-   STRIPE INIT (SAFE IMPORT)
-=============================== */
 const stripe = require("../lib/stripe");
 
-if (!stripe) {
-  throw new Error("Stripe instance missing in ../lib/stripe");
+/* ===============================
+   VALIDATE STRIPE INSTANCE
+=============================== */
+if (!stripe || typeof stripe.checkout?.sessions?.create !== "function") {
+  throw new Error("Invalid Stripe instance in ../lib/stripe");
 }
 
 /* ===============================
    CREATE CHECKOUT SESSION
 =============================== */
-async function createCheckoutSession({
-  email,
-  leadId,
-  plan = "starter",
-  amount,
-}) {
+async function createCheckoutSession(params) {
+  const {
+    email,
+    leadId,
+    plan = "starter",
+    amount,
+  } = params || {};
+
   try {
     /* ===============================
        VALIDATION
     =============================== */
     if (!email) throw new Error("Missing email");
     if (!amount || isNaN(amount)) throw new Error("Invalid amount");
-
-    if (!process.env.FRONTEND_URL) {
-      throw new Error("Missing FRONTEND_URL");
-    }
+    if (!process.env.FRONTEND_URL) throw new Error("Missing FRONTEND_URL");
 
     /* ===============================
-       CONVERT TO CENTS (STRIPE REQUIREMENT)
+       NORMALIZE AMOUNT SAFELY
+       (prevents double-cents bug)
     =============================== */
-    const unitAmount = Math.round(Number(amount) * 100);
+    const numericAmount = Number(amount);
+    const unitAmount =
+      numericAmount < 100 ? Math.round(numericAmount * 100) : Math.round(numericAmount);
 
     /* ===============================
-       IDEMPOTENCY KEY (SAFE DEDUPE)
+       IDEMPOTENCY KEY
     =============================== */
     const idempotencyKey = crypto
       .createHash("sha256")
@@ -43,7 +44,7 @@ async function createCheckoutSession({
       .digest("hex");
 
     /* ===============================
-       CREATE STRIPE SESSION
+       CREATE SESSION
     =============================== */
     const session = await stripe.checkout.sessions.create(
       {
@@ -70,7 +71,7 @@ async function createCheckoutSession({
         metadata: {
           email,
           plan,
-          leadId: leadId || null,
+          leadId: leadId || "",
         },
       },
       {
@@ -78,20 +79,27 @@ async function createCheckoutSession({
       }
     );
 
+    if (!session?.url) {
+      throw new Error("Stripe did not return a checkout URL");
+    }
+
     return {
       url: session.url,
       id: session.id,
     };
+
   } catch (err) {
-    console.error("❌ Stripe Checkout Error:", {
+    const safeLog = {
       message: err.message,
       email,
       leadId,
       plan,
       amount,
-    });
+    };
 
-    throw new Error("Failed to create checkout session");
+    console.error("❌ Stripe Checkout Error:", safeLog);
+
+    throw new Error("Checkout session creation failed");
   }
 }
 
