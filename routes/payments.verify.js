@@ -20,13 +20,28 @@ router.get("/verify", async (req, res) => {
     }
 
     /* ===============================
-       FETCH STRIPE SESSION
+       FETCH STRIPE SESSION (SAFE)
     =============================== */
-    session = await stripe.checkout.sessions.retrieve(session_id);
+    try {
+      session = await stripe.checkout.sessions.retrieve(session_id);
+    } catch (stripeErr) {
+      console.error("Stripe fetch error:", stripeErr.message);
 
-    const paid = session?.payment_status === "paid";
+      return res.status(500).json({
+        success: false,
+        paid: false,
+        error: "stripe_session_fetch_failed",
+      });
+    }
 
-    if (!paid) {
+    /* ===============================
+       STRICT PAYMENT CHECK
+    =============================== */
+    const isPaid =
+      session?.payment_status === "paid" &&
+      session?.status === "complete";
+
+    if (!isPaid) {
       return res.json({
         success: true,
         paid: false,
@@ -34,11 +49,11 @@ router.get("/verify", async (req, res) => {
     }
 
     /* ===============================
-       EXTRACT IDENTITY
+       EXTRACT CUSTOMER DATA
     =============================== */
     const email =
-      session.customer_details?.email ||
-      session.customer_email ||
+      session?.customer_details?.email ||
+      session?.customer_email ||
       null;
 
     const leadIdFromMeta = session?.metadata?.leadId || null;
@@ -46,13 +61,15 @@ router.get("/verify", async (req, res) => {
     let targetLeadId = leadIdFromMeta;
 
     /* ===============================
-       FALLBACK LOOKUP (SAFE MATCH)
+       FALLBACK LOOKUP (NORMALIZED EMAIL)
     =============================== */
     if (!targetLeadId && email) {
+      const normalizedEmail = email.toLowerCase().trim();
+
       const { data, error } = await supabase
         .from("leads")
         .select("id")
-        .eq("email", email.toLowerCase().trim())
+        .eq("email", normalizedEmail)
         .maybeSingle();
 
       if (error) {
@@ -63,7 +80,7 @@ router.get("/verify", async (req, res) => {
     }
 
     /* ===============================
-       UPDATE LEAD
+       IDEMPOTENT UPDATE (SAFE)
     =============================== */
     if (targetLeadId) {
       const { error: updateError } = await supabase
@@ -74,7 +91,8 @@ router.get("/verify", async (req, res) => {
           activated_at: new Date().toISOString(),
           stripe_session_id: session_id,
         })
-        .eq("id", targetLeadId);
+        .eq("id", targetLeadId)
+        .eq("paid", false); // prevents repeated writes
 
       if (updateError) {
         console.error("Lead update error:", updateError);
