@@ -2,51 +2,105 @@
   const btn = document.getElementById("checkoutBtn");
 
   btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.innerText = "Redirecting...";
+    const originalText = btn.innerText;
 
     try {
-      const email = prompt("Enter your email:");
+      /* ===============================
+         LOADING STATE
+      =============================== */
+      btn.disabled = true;
+      btn.innerText = "Redirecting...";
 
-      if (!email) {
+      /* ===============================
+         GET EMAIL
+      =============================== */
+      const input = prompt("Enter your email address:");
+
+      if (!input) {
         throw new Error("Email is required");
       }
 
-      const res = await fetch("/api/payments/checkout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email,
-          name: "Guest User",
-          plan: "starter"
-        })
-      });
+      /* ===============================
+         CLEAN + VALIDATE EMAIL
+      =============================== */
+      const email = input.trim().toLowerCase();
 
-      let data;
+      const emailRegex =
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+      if (!emailRegex.test(email)) {
+        throw new Error("Please enter a valid email");
+      }
+
+      /* ===============================
+         CREATE CHECKOUT SESSION
+      =============================== */
+      const response = await fetch(
+        "/api/payments/checkout",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            email,
+            name: "Guest User",
+            plan: "starter",
+          }),
+        }
+      );
+
+      /* ===============================
+         SAFE RESPONSE PARSE
+      =============================== */
+      let data = null;
+
       try {
-        data = await res.json();
-      } catch {
-        throw new Error("Invalid server response");
+        data = await response.json();
+      } catch (parseError) {
+        throw new Error("Server returned invalid JSON");
       }
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Checkout failed");
+      /* ===============================
+         API ERROR HANDLING
+      =============================== */
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          data?.message ||
+          "Checkout request failed"
+        );
       }
 
+      /* ===============================
+         VALIDATE STRIPE URL
+      =============================== */
       if (!data?.url) {
-        throw new Error("No checkout URL returned");
+        throw new Error(
+          "Stripe checkout URL missing"
+        );
       }
 
+      /* ===============================
+         REDIRECT USER
+      =============================== */
       window.location.href = data.url;
 
     } catch (err) {
-      console.error(err);
-      alert(err.message || "Error starting checkout");
+      console.error("Checkout Error:", err);
 
+      alert(
+        err.message ||
+        "Unable to start checkout"
+      );
+
+      /* ===============================
+         RESET BUTTON
+      =============================== */
       btn.disabled = false;
-      btn.innerText = "Get Started";
+      btn.innerText = originalText;
     }
   });
 </script>
