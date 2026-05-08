@@ -20,7 +20,22 @@ app.use(
 );
 
 /* ===============================
-   HOME PAGE (NEW)
+   STRIPE WEBHOOK (RAW BODY FIRST)
+   MUST BE BEFORE express.json()
+=============================== */
+app.use(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" })
+);
+
+/* ===============================
+   BODY PARSERS
+=============================== */
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/* ===============================
+   HOME PAGE
 =============================== */
 app.get("/", (req, res) => {
   res.send(`
@@ -66,20 +81,6 @@ app.get("/", (req, res) => {
     </html>
   `);
 });
-
-/* ===============================
-   STRIPE WEBHOOK (RAW BODY FIRST)
-=============================== */
-app.use(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" })
-);
-
-/* ===============================
-   BODY PARSER (AFTER WEBHOOK)
-=============================== */
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 /* ===============================
    ROUTES
