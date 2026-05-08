@@ -9,19 +9,66 @@ const app = express();
 app.set("trust proxy", 1);
 
 /* ===============================
-   CORS (PRODUCTION SAFE)
+   CORS (PRODUCTION SAFE + FALLBACK)
 =============================== */
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.FRONTEND_URL || "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   })
 );
 
 /* ===============================
+   HOME PAGE (NEW)
+=============================== */
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>NorthSky Flow OS</title>
+        <style>
+          body {
+            margin: 0;
+            font-family: Arial;
+            background: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+          }
+          .card {
+            text-align: center;
+            background: #1e293b;
+            padding: 40px;
+            border-radius: 16px;
+            max-width: 500px;
+          }
+          .btn {
+            margin-top: 20px;
+            display: inline-block;
+            padding: 12px 18px;
+            background: #22c55e;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>🚀 NorthSky Flow OS</h1>
+          <p>AI Lead Automation + Stripe Payments Engine</p>
+          <a class="btn" href="/health">System Status</a>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+/* ===============================
    STRIPE WEBHOOK (RAW BODY FIRST)
-   ⚠️ MUST BE BEFORE express.json()
 =============================== */
 app.use(
   "/api/stripe/webhook",
@@ -29,7 +76,7 @@ app.use(
 );
 
 /* ===============================
-   BODY PARSER (AFTER WEBHOOK ONLY)
+   BODY PARSER (AFTER WEBHOOK)
 =============================== */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -55,7 +102,7 @@ app.get("/health", (req, res) => {
 });
 
 /* ===============================
-   404 HANDLER (DEBUG FRIENDLY)
+   404 HANDLER
 =============================== */
 app.use((req, res) => {
   res.status(404).json({
@@ -67,7 +114,7 @@ app.use((req, res) => {
 });
 
 /* ===============================
-   GLOBAL ERROR HANDLER (IMPORTANT FIX)
+   GLOBAL ERROR HANDLER
 =============================== */
 app.use((err, req, res, next) => {
   console.error("🔥 Server Error:", err);
