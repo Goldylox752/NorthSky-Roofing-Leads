@@ -14,9 +14,9 @@ router.post("/", async (req, res) => {
   let leadId = null;
 
   try {
-    const { name, email, phone, city } = req.body;
+    const { name, email, phone, city } = req.body || {};
 
-    const cleanEmail = email?.trim().toLowerCase();
+    const cleanEmail = email?.trim().toLowerCase() || null;
 
     /* ===============================
        VALIDATION
@@ -42,11 +42,13 @@ router.post("/", async (req, res) => {
     /* ===============================
        DUPLICATE CHECK
     =============================== */
-    const { data: existing } = await supabase
+    const { data: existing, error: findError } = await supabase
       .from("leads")
       .select("*")
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
+
+    if (findError) throw findError;
 
     if (existing) {
       return res.json({
@@ -65,7 +67,7 @@ router.post("/", async (req, res) => {
     const price = calculatePrice(score, city);
 
     /* ===============================
-       CREATE LEAD (PENDING PAYMENT)
+       CREATE LEAD
     =============================== */
     const { data: lead, error } = await supabase
       .from("leads")
@@ -104,11 +106,11 @@ router.post("/", async (req, res) => {
     });
 
     if (!session?.url) {
-      throw new Error("Stripe session failed to return URL");
+      throw new Error("Stripe session missing URL");
     }
 
     /* ===============================
-       UPDATE STATE → PAYMENT STARTED
+       UPDATE LEAD STATUS
     =============================== */
     await supabase
       .from("leads")
@@ -118,7 +120,7 @@ router.post("/", async (req, res) => {
       .eq("id", lead.id);
 
     /* ===============================
-       SUCCESS RESPONSE (CONSISTENT)
+       RESPONSE
     =============================== */
     return res.json({
       success: true,
@@ -132,9 +134,6 @@ router.post("/", async (req, res) => {
   } catch (err) {
     console.error("❌ LEAD FLOW ERROR:", err);
 
-    /* ===============================
-       SAFE FAILURE STATE UPDATE
-    =============================== */
     if (leadId) {
       await supabase
         .from("leads")
