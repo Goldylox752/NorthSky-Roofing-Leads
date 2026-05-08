@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "");
 
 /* ===============================
    ENV SAFETY CHECK
@@ -8,21 +8,34 @@ if (!API_URL) {
 }
 
 /* ===============================
-   SAFE FETCH WRAPPER
+   CORE FETCH WRAPPER (ROBUST)
 =============================== */
-async function safeFetch(url, options) {
-  const res = await fetch(url, options);
+async function safeFetch(endpoint, options = {}) {
+  const url = `${API_URL}${endpoint}`;
 
-  let data = null;
+  let res;
+  let data;
+
+  try {
+    res = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch (err) {
+    throw new Error("Network error: backend unreachable");
+  }
 
   try {
     data = await res.json();
   } catch {
-    throw new Error("Invalid JSON response from server");
+    data = null;
   }
 
   if (!res.ok) {
-    throw new Error(data?.error || "Request failed");
+    throw new Error(data?.error || `Request failed (${res.status})`);
   }
 
   return data;
@@ -31,30 +44,21 @@ async function safeFetch(url, options) {
 /* ===============================
    CREATE LEAD
 =============================== */
-export async function createLead(data) {
-  return await safeFetch(`${API_URL}/api/leads`, {
+export async function createLead(payload) {
+  return safeFetch("/api/leads", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   });
 }
 
 /* ===============================
-   STRIPE CHECKOUT (FIXED ROUTE)
+   STRIPE CHECKOUT
 =============================== */
 export async function createCheckout(payload) {
-  const data = await safeFetch(
-    `${API_URL}/api/payments/checkout`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }
-  );
+  const data = await safeFetch("/api/payments/checkout", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
   if (!data?.url) {
     throw new Error("Missing Stripe checkout URL");
