@@ -3,12 +3,11 @@
 // =====================
 const API = process.env.NEXT_PUBLIC_API_URL;
 
-if (!API) {
-  throw new Error("Missing NEXT_PUBLIC_API_URL");
+if (typeof window !== "undefined" && !API) {
+  console.warn("Missing NEXT_PUBLIC_API_URL");
 }
 
-// remove trailing slash to prevent double slashes
-const BASE_URL = API.replace(/\/$/, "");
+const BASE_URL = (API || "").replace(/\/$/, "");
 
 // =====================
 // TOKEN HELPERS
@@ -37,14 +36,12 @@ async function apiFetch(path, options = {}) {
       },
       body: options.body,
       signal: controller.signal,
-      credentials: "include",
     });
 
     clearTimeout(timeout);
 
-    const isJson = res.headers
-      .get("content-type")
-      ?.includes("application/json");
+    const contentType = res.headers.get("content-type");
+    const isJson = contentType && contentType.includes("application/json");
 
     const data = isJson ? await res.json() : await res.text();
 
@@ -56,9 +53,12 @@ async function apiFetch(path, options = {}) {
 
     return data;
   } catch (err) {
+    clearTimeout(timeout);
+
     if (err.name === "AbortError") {
       throw new Error("Request timeout — server not responding");
     }
+
     throw err;
   }
 }
@@ -90,6 +90,7 @@ export function scoreLead(payload) {
 // =====================
 // STRIPE
 // =====================
+// NOTE: make sure this matches your Render backend route exactly
 export function createCheckoutSession(payload) {
   return apiFetch("/api/payments/create-session", {
     method: "POST",
