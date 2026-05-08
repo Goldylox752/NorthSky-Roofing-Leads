@@ -6,31 +6,48 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
+    if (!API_URL) {
+      alert("System not configured");
+      return;
+    }
+
     try {
       setLoading(true);
 
-      const res = await fetch(`${API_URL}/api/payments/checkout`, {
+      /* ===============================
+         CREATE LEAD + CHECKOUT FLOW
+      =============================== */
+      const res = await fetch(`${API_URL}/api/leads`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: "test@example.com", // replace with real input later
+          email: "test@example.com", // replace later with real input
           name: "Test User",
-          plan: "starter",
+          city: "Calgary",
+          phone: null,
         }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
+      if (!res.ok || !data?.checkout?.leadId) {
         throw new Error(data?.error || "Checkout failed");
       }
 
-      if (data?.url) {
-        window.location.href = data.url;
+      /* ===============================
+         STORE LEAD FOR WEBHOOK MATCHING
+      =============================== */
+      localStorage.setItem("leadId", data.checkout.leadId);
+
+      /* ===============================
+         REDIRECT TO STRIPE
+      =============================== */
+      if (data.checkout?.url) {
+        window.location.href = data.checkout.url;
       } else {
-        throw new Error("No checkout URL returned");
+        throw new Error("Missing checkout URL");
       }
 
     } catch (err) {
@@ -53,7 +70,7 @@ export default function Home() {
         style={{
           marginTop: 20,
           padding: "12px 24px",
-          background: loading ? "#999" : "#22c55e",
+          background: loading ? "#6b7280" : "#22c55e",
           color: "white",
           border: "none",
           cursor: "pointer",
