@@ -35,9 +35,10 @@ app.get("/", (req, res) => {
             padding: 14px 22px;
             background: #22c55e;
             color: white;
-            text-decoration: none;
+            border: none;
             border-radius: 10px;
             font-weight: bold;
+            cursor: pointer;
           }
 
           .section {
@@ -77,7 +78,11 @@ app.get("/", (req, res) => {
           <div class="hero">
             <h1>🚀 NorthSky Flow OS</h1>
             <p>Automate leads. Capture payments. Scale your business with AI.</p>
-            <a class="btn" href="/api/payments/checkout">Get Started</a>
+
+            <!-- REAL CHECKOUT BUTTON -->
+            <button class="btn" id="checkoutBtn">
+              Get Started
+            </button>
           </div>
 
           <!-- FEATURES -->
@@ -134,6 +139,37 @@ app.get("/", (req, res) => {
           </div>
 
         </div>
+
+        <script>
+          document.getElementById("checkoutBtn").addEventListener("click", async () => {
+            try {
+              const res = await fetch("/api/payments/checkout", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  email: "test@example.com",
+                  name: "Guest User",
+                  plan: "starter"
+                })
+              });
+
+              const data = await res.json();
+
+              if (data && data.url) {
+                window.location.href = data.url;
+              } else {
+                alert("Checkout failed");
+              }
+
+            } catch (err) {
+              console.error(err);
+              alert("Error starting checkout");
+            }
+          });
+        </script>
+
       </body>
     </html>
   `);
