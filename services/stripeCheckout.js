@@ -1,5 +1,13 @@
-const stripe = require("../lib/stripe");
 const crypto = require("crypto");
+
+/* ===============================
+   STRIPE INIT (SAFE IMPORT)
+=============================== */
+const stripe = require("../lib/stripe");
+
+if (!stripe) {
+  throw new Error("Stripe instance missing in ../lib/stripe");
+}
 
 /* ===============================
    CREATE CHECKOUT SESSION
@@ -7,64 +15,84 @@ const crypto = require("crypto");
 async function createCheckoutSession({
   email,
   leadId,
-  plan,
+  plan = "starter",
   amount,
 }) {
-  if (!email || !plan || !amount) {
-    throw new Error("Missing required checkout parameters");
-  }
+  try {
+    /* ===============================
+       VALIDATION
+    =============================== */
+    if (!email) throw new Error("Missing email");
+    if (!amount || isNaN(amount)) throw new Error("Invalid amount");
 
-  /* ===============================
-     IDEMPOTENCY KEY (PREVENT DUPLICATES)
-  =============================== */
-  const idempotencyKey = crypto
-    .createHash("sha256")
-    .update(email + plan + String(amount))
-    .digest("hex");
-
-  /* ===============================
-     CREATE SESSION
-  =============================== */
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "payment",
-      customer_email: email,
-
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `Flow OS - ${plan.toUpperCase()}`,
-              description: "AI-powered lead automation system",
-            },
-            unit_amount: amount,
-          },
-          quantity: 1,
-        },
-      ],
-
-      /* ===============================
-         CRITICAL REDIRECTS
-      =============================== */
-      success_url: `${process.env.FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/cancel`,
-
-      /* ===============================
-         WEBHOOK LINKING DATA
-      =============================== */
-      metadata: {
-        email,
-        plan,
-        leadId: leadId || null,
-      },
-    },
-    {
-      idempotencyKey,
+    if (!process.env.FRONTEND_URL) {
+      throw new Error("Missing FRONTEND_URL");
     }
-  );
 
-  return session;
+    /* ===============================
+       CONVERT TO CENTS (STRIPE REQUIREMENT)
+    =============================== */
+    const unitAmount = Math.round(Number(amount) * 100);
+
+    /* ===============================
+       IDEMPOTENCY KEY (SAFE DEDUPE)
+    =============================== */
+    const idempotencyKey = crypto
+      .createHash("sha256")
+      .update(`${email}:${leadId}:${plan}:${unitAmount}`)
+      .digest("hex");
+
+    /* ===============================
+       CREATE STRIPE SESSION
+    =============================== */
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        customer_email: email,
+
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `Flow OS - ${plan.toUpperCase()}`,
+                description: "AI-powered lead automation system",
+              },
+              unit_amount: unitAmount,
+            },
+            quantity: 1,
+          },
+        ],
+
+        success_url: `${process.env.FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL}/cancel`,
+
+        metadata: {
+          email,
+          plan,
+          leadId: leadId || null,
+        },
+      },
+      {
+        idempotencyKey,
+      }
+    );
+
+    return {
+      url: session.url,
+      id: session.id,
+    };
+  } catch (err) {
+    console.error("❌ Stripe Checkout Error:", {
+      message: err.message,
+      email,
+      leadId,
+      plan,
+      amount,
+    });
+
+    throw new Error("Failed to create checkout session");
+  }
 }
 
 module.exports = {
