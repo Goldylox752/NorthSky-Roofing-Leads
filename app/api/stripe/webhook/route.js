@@ -14,10 +14,11 @@ const supabase = createClient(
 );
 
 /* ===============================
-   HANDLE EVENT
+   HANDLE EVENT LOGIC
 =============================== */
 async function handleEvent(event) {
   if (event.type !== "checkout.session.completed") {
+    console.log("Ignored event:", event.type);
     return;
   }
 
@@ -27,8 +28,16 @@ async function handleEvent(event) {
   const plan = session.metadata?.plan;
 
   if (!leadId || !plan) {
+    console.error("Invalid metadata:", session.metadata);
     throw new Error("Missing leadId or plan in metadata");
   }
+
+  const customerId =
+    session.customer ||
+    session.customer_details?.email ||
+    null;
+
+  const amount = (session.amount_total || 0) / 100;
 
   /* ===============================
      1. UPDATE LEAD
@@ -39,29 +48,35 @@ async function handleEvent(event) {
       paid: true,
       plan,
       status: "paid",
-      stripe_customer_id: session.customer || null,
+      stripe_customer_id: customerId,
     })
     .eq("id", leadId);
 
-  if (leadError) throw leadError;
+  if (leadError) {
+    console.error("Lead update failed:", leadError);
+    throw leadError;
+  }
 
   /* ===============================
-     2. CREATE PAYMENT RECORD (SOURCE OF TRUTH)
+     2. CREATE PAYMENT RECORD
   =============================== */
   const { error: paymentError } = await supabase
     .from("payments")
-    .insert({
-      id: session.id,
-      lead_id: leadId,
-      stripe_customer_id: session.customer || null,
-      amount: session.amount_total || 0,
-      currency: session.currency || "usd",
-      status: "paid",
-      created_at: new Date().toISOString(),
-    });
+    .upsert(
+      {
+        id: session.id,
+        lead_id: leadId,
+        stripe_customer_id: customerId,
+        amount,
+        currency: session.currency || "usd",
+        status: "paid",
+        created_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
 
-  if (paymentError && paymentError.code !== "23505") {
-    // ignore duplicates, but fail real errors
+  if (paymentError) {
+    console.error("Payment insert failed:", paymentError);
     throw paymentError;
   }
 }
@@ -94,32 +109,22 @@ router.post(
       console.log("[StripeWebhook]", event.id, event.type);
 
       /* ===============================
-         IDEMPOTENCY (SAFE FIRST INSERT)
+         IDEMPOTENCY (UPsert = SAFE)
       =============================== */
-      const { data: existing } = await supabase
-        .from("stripe_events")
-        .select("id")
-        .eq("id", event.id)
-        .maybeSingle();
-
-      if (existing) {
-        return res.json({ ok: true, duplicate: true });
-      }
-
       const { error: insertError } = await supabase
         .from("stripe_events")
-        .insert({
-          id: event.id,
-          type: event.type,
-          status: "processing",
-          created_at: new Date().toISOString(),
-        });
+        .upsert(
+          {
+            id: event.id,
+            type: event.type,
+            status: "processing",
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
 
       if (insertError) {
-        // if duplicate race happens
-        if (insertError.code === "23505") {
-          return res.json({ ok: true, duplicate: true });
-        }
+        console.error("Event insert failed:", insertError);
         throw insertError;
       }
 
