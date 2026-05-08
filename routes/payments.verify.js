@@ -6,60 +6,78 @@ const supabase = require("../lib/supabase");
    VERIFY STRIPE PAYMENT SESSION
 =============================== */
 router.get("/verify", async (req, res) => {
+  let session = null;
+
   try {
     const { session_id } = req.query;
 
     if (!session_id) {
-      return res.status(400).json({ paid: false });
+      return res.status(400).json({
+        success: false,
+        paid: false,
+        error: "Missing session_id",
+      });
     }
 
     /* ===============================
-       GET STRIPE SESSION
+       FETCH STRIPE SESSION
     =============================== */
-    const session = await stripe.checkout.sessions.retrieve(session_id);
+    session = await stripe.checkout.sessions.retrieve(session_id);
 
-    const paid = session.payment_status === "paid";
+    const paid = session?.payment_status === "paid";
 
     if (!paid) {
-      return res.json({ paid: false });
+      return res.json({
+        success: true,
+        paid: false,
+      });
     }
 
+    /* ===============================
+       EXTRACT IDENTITY
+    =============================== */
     const email =
       session.customer_details?.email ||
-      session.customer_email;
+      session.customer_email ||
+      null;
 
-    const leadId = session.metadata?.leadId;
+    const leadIdFromMeta = session?.metadata?.leadId || null;
+
+    let targetLeadId = leadIdFromMeta;
 
     /* ===============================
-       FALLBACK: EMAIL LOOKUP (CRITICAL FIX)
+       FALLBACK LOOKUP (SAFE MATCH)
     =============================== */
-    let targetLeadId = leadId;
-
     if (!targetLeadId && email) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("leads")
         .select("id")
         .eq("email", email.toLowerCase().trim())
         .maybeSingle();
 
-      targetLeadId = data?.id;
+      if (error) {
+        console.error("Lead lookup error:", error);
+      }
+
+      targetLeadId = data?.id || null;
     }
 
     /* ===============================
-       UPDATE LEAD (SAFE)
+       UPDATE LEAD
     =============================== */
     if (targetLeadId) {
-      const { error } = await supabase
+      const { error: updateError } = await supabase
         .from("leads")
         .update({
           paid: true,
           status: "paid",
           activated_at: new Date().toISOString(),
+          stripe_session_id: session_id,
         })
         .eq("id", targetLeadId);
 
-      if (error) {
-        console.error("DB update error:", error);
+      if (updateError) {
+        console.error("Lead update error:", updateError);
       }
     }
 
@@ -67,15 +85,20 @@ router.get("/verify", async (req, res) => {
        RESPONSE
     =============================== */
     return res.json({
+      success: true,
       paid: true,
       email,
-      leadId: targetLeadId || null,
+      leadId: targetLeadId,
     });
 
   } catch (err) {
-    console.error("VERIFY ERROR:", err);
+    console.error("❌ PAYMENT VERIFY ERROR:", {
+      message: err.message,
+      session_id: req.query?.session_id,
+    });
 
     return res.status(500).json({
+      success: false,
       paid: false,
       error: "verification_failed",
     });
