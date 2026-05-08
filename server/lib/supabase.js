@@ -20,18 +20,12 @@ const supabase = createClient(
       detectSessionInUrl: false,
     },
 
-    // ✅ IMPORTANT: fully disable realtime (not partial)
+    /* ===============================
+       🔥 CRITICAL FIX
+       FULLY DISABLE REALTIME
+    =============================== */
     realtime: {
-      params: {
-        eventsPerSecond: 0,
-      },
-    },
-
-    // ✅ ensure no websocket dependency is initialized
-    global: {
-      headers: {
-        "X-Client-Info": "flow-os-backend",
-      },
+      enabled: false,
     },
   }
 );
